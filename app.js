@@ -1004,49 +1004,181 @@ function renderTimetable(){
     </div>`;
   }
 
-  const tabs=['Today','Tomorrow','This week'];
+  const tabs=[{label:'Today',icon:'◉'},{label:'Tomorrow',icon:'→'},{label:'This week',icon:'▦'}];
   const now=new Date();
   let daysToShow=[];
   if(S.ttTab===0){daysToShow=[today()];}
   else if(S.ttTab===1){daysToShow=[addDays(today(),1)];}
   else{
-    // Next 5 weekdays
     let d=today();
     for(let i=0;i<14&&daysToShow.length<5;i++){if(!isWeekend(d))daysToShow.push(d);d=addDays(d,1);}
   }
 
+  // Psychology: compute day-level micro-progress for Zeigarnik + endowed progress
+  function dayProgress(dateStr){
+    const evs=getDayTT(tt,dateStr);
+    if(!evs.length)return{total:0,done:0,cur:0,pct:0};
+    const done=evs.filter(ev=>now>=new Date(ev.end)).length;
+    const cur=evs.filter(ev=>now>=new Date(ev.start)&&now<new Date(ev.end)).length;
+    // Endowed progress: count current class as partially done
+    const effective=done+(cur?0.5:0);
+    return{total:evs.length,done,cur,pct:evs.length?Math.round((effective/evs.length)*100):0};
+  }
+
+  // Psychology: focus card — answers "what should I do right now?" (reduces overwhelm)
+  function renderFocusCard(){
+    const nn=getNowNext(tt);
+    const sessions=S.data.sessions||[];
+    const todayEvs=getDayTT(tt,today());
+    const dp=dayProgress(today());
+    const logged=todaySess(sessions).length;
+
+    // Day is done — celebration state
+    if(nn.type==='done'){
+      const totalLogged=todaySess(sessions).reduce((a,s)=>a+s.duration,0);
+      return`<div class="tt-focus tt-focus-done">
+        <div class="tt-focus-icon">✓</div>
+        <div class="tt-focus-content">
+          <div class="tt-focus-label">Day complete</div>
+          <div class="tt-focus-title">All ${dp.total} classes finished</div>
+          <div class="tt-focus-sub">${logged?`${logged} session${logged>1?'s':''} logged · ${fmtDur(totalLogged)} studied`:'Log what you learned today to lock it in'}</div>
+        </div>
+      </div>`;
+    }
+
+    // Currently in class
+    if(nn.type==='in-class'){
+      const sub=S.data.subjects.find(x=>x.id===nn.ev.subjectId);
+      const c=getSubjColor(sub||{color:0});
+      const s=new Date(nn.ev.start),e=new Date(nn.ev.end);
+      const pct=Math.min(100,((now-s)/(e-s))*100);
+      const alreadyLogged=todaySess(sessions).some(sess=>sess.subject===nn.ev.subjectId&&sess.date===today());
+      return`<div class="tt-focus tt-focus-now" style="border-color:${c.bd};background:${c.bg}">
+        <div class="tt-focus-dot" style="background:${c.tx}"></div>
+        <div class="tt-focus-content">
+          <div class="tt-focus-label" style="color:${c.tx}">Right now · ${nn.mLeft}m left</div>
+          <div class="tt-focus-title" style="color:${c.tx}">${sub?.name||nn.ev.subjectName}</div>
+          <div class="tt-focus-sub">${nn.ev.room}${nn.ev.teacher?' · '+nn.ev.teacher:''}</div>
+        </div>
+        ${!alreadyLogged?`<div class="tt-focus-act" data-action="quick-log" data-subject="${nn.ev.subjectId}" style="background:${c.tx}">Log</div>`:`<div class="tt-focus-logged">Logged</div>`}
+        <div class="tt-focus-bar"><div class="tt-focus-bar-fill" data-period-prog data-start="${nn.ev.start}" data-end="${nn.ev.end}" style="width:${pct}%;background:${c.tx}"></div></div>
+      </div>`;
+    }
+
+    // Next class coming up
+    if(nn.type==='next'){
+      const sub=S.data.subjects.find(x=>x.id===nn.ev.subjectId);
+      const c=getSubjColor(sub||{color:0});
+      // Study prompt: implementation intention style
+      const gap=nn.mUntil;
+      const studyHint=gap>=15&&logged<todayEvs.length?`<div class="tt-focus-hint">You have ${fmtMins(gap)} free — review something from earlier?</div>`:'';
+      return`<div class="tt-focus tt-focus-next" style="border-left:4px solid ${c.tx}">
+        <div class="tt-focus-content">
+          <div class="tt-focus-label">Up next · in ${fmtMins(nn.mUntil)}</div>
+          <div class="tt-focus-title">${sub?.name||nn.ev.subjectName}</div>
+          <div class="tt-focus-sub">${nn.ev.room}${nn.ev.teacher?' · '+nn.ev.teacher:''}</div>
+          ${studyHint}
+        </div>
+      </div>`;
+    }
+
+    // No school today
+    if(nn.type==='no-school'){
+      const sub=nn.nextFirst?S.data.subjects.find(x=>x.id===nn.nextFirst.subjectId):null;
+      // Fresh start effect: frame as opportunity, not absence
+      return`<div class="tt-focus tt-focus-free">
+        <div class="tt-focus-content">
+          <div class="tt-focus-label">No classes today</div>
+          <div class="tt-focus-title">Free day — good time to get ahead</div>
+          <div class="tt-focus-sub">Next: ${nn.nextDayName}${sub?' starts with '+sub.name:''}</div>
+        </div>
+      </div>`;
+    }
+
+    return'';
+  }
+
+  // Psychology: micro-progress bar for the day (Zeigarnik + endowed progress)
+  function renderDayProgress(dateStr){
+    const dp=dayProgress(dateStr);
+    if(!dp.total)return'';
+    const evs=getDayTT(tt,dateStr);
+    const loggedCount=evs.filter(ev=>{
+      const isPast=now>=new Date(ev.end);
+      return isPast&&S.data.sessions.some(s=>s.subject===ev.subjectId&&s.date===dateStr);
+    }).length;
+    // Zeigarnik: show partial completion to create pull
+    const allDone=dp.done===dp.total;
+    return`<div class="tt-day-prog">
+      <div class="tt-day-prog-bar"><div class="tt-day-prog-fill${allDone?' done':''}" style="width:${dp.pct}%"></div></div>
+      <span class="tt-day-prog-text">${dp.done}/${dp.total} done${loggedCount?` · ${loggedCount} logged`:''}</span>
+    </div>`;
+  }
+
   function renderDay(dateStr){
     const evs=getDayTT(tt,dateStr);
-    const dayName=dateStr===today()?'Today':dateStr===addDays(today(),1)?'Tomorrow':new Date(dateStr+'T12:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
+    const isToday=dateStr===today();
+    const dayName=isToday?'Today':dateStr===addDays(today(),1)?'Tomorrow':new Date(dateStr+'T12:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
+    const totalHrs=evs.reduce((a,e)=>a+(new Date(e.end)-new Date(e.start))/60000,0)/60;
+
+    // Fresh start: Monday gets special framing
+    const dayOfWeek=new Date(dateStr+'T12:00:00').getDay();
+    const isMon=dayOfWeek===1&&!isToday;
+
     return`<div class="tt-day">
-      <div class="tt-day-hd"><span${dateStr===today()?' class="today-mark"':''}>${dayName}</span><span>${evs.reduce((a,e)=>a+(new Date(e.end)-new Date(e.start))/60000,0)/60|0}h ${evs.length} classes</span></div>
-      ${evs.length===0?`<div style="padding:12px 0;font-size:13px;color:var(--tx3);">No classes${isWeekend(dateStr)?' — weekend':' scheduled'}.</div>`:`
-      <div class="tt-list">${evs.map(ev=>{
+      <div class="tt-day-hd">
+        <span${isToday?' class="today-mark"':''}>${isMon?'Fresh week · ':''}${dayName}</span>
+        <span>${totalHrs.toFixed(1).replace('.0','')}h · ${evs.length} class${evs.length!==1?'es':''}</span>
+      </div>
+      ${renderDayProgress(dateStr)}
+      ${evs.length===0?`<div class="tt-empty">No classes${isWeekend(dateStr)?' — enjoy your weekend':' scheduled'}.</div>`:`
+      <div class="tt-list">${evs.map((ev,idx)=>{
         const s=new Date(ev.start),e=new Date(ev.end);
         const isCur=now>=s&&now<e,isPast=now>=e;
         const sub=S.data.subjects.find(x=>x.id===ev.subjectId);
         const c=getSubjColor(sub||{color:0});
         const pct=isCur?Math.min(100,((now-s)/(e-s))*100):0;
-        const alreadyLogged=todaySess(S.data.sessions).some(sess=>sess.subject===ev.subjectId&&sess.date===dateStr);
-        return`<div class="tt-item${isCur?' now':isPast?' past':''}">
-          <div style="position:absolute;left:0;top:0;bottom:0;width:4px;background:${c.tx}"></div>
-          <div class="tt-period">${ev.period}</div>
+        const alreadyLogged=S.data.sessions.some(sess=>sess.subject===ev.subjectId&&sess.date===dateStr);
+        const durMins=Math.round((e-s)/60000);
+
+        // Upcoming class: show gentle prep cue (implementation intention)
+        const isNextUp=!isPast&&!isCur&&idx>0&&now>=new Date(evs[idx-1]?.end);
+
+        return`<div class="tt-item${isCur?' now':isPast&&alreadyLogged?' past logged':isPast?' past':''}${isNextUp?' next-up':''}">
+          <div class="tt-item-accent" style="background:${c.tx}"></div>
+          <div class="tt-period">${ev.period||'—'}</div>
           <div class="tt-info">
             <div class="tt-name">${sub?.name||ev.subjectName}</div>
-            <div class="tt-meta">${ev.room}${ev.teacher?' · '+ev.teacher:''}</div>
+            <div class="tt-meta">${ev.room}${ev.teacher?' · '+ev.teacher:''}${!isCur&&!isPast?` · ${durMins}m`:''}</div>
           </div>
-          <div class="tt-times">${fmtTime(s)}<br><span style="color:var(--tx3)">${fmtTime(e)}</span></div>
-          ${(isCur||isPast)&&!alreadyLogged?`<div class="tt-log" data-action="quick-log" data-subject="${ev.subjectId}">Log</div>`:''}
-          ${alreadyLogged?`<div style="font-size:12px;color:var(--ok);">✓ Logged</div>`:''}
-          ${isCur?`<div class="tt-progress"><div class="tt-progress-fill" data-period-prog data-start="${ev.start}" data-end="${ev.end}" style="width:${pct}%"></div></div>`:''}
+          <div class="tt-right">
+            <div class="tt-times">${fmtTime(s)}<br><span class="tt-time-end">${fmtTime(e)}</span></div>
+            ${isCur&&!alreadyLogged?`<div class="tt-log tt-log-now" data-action="quick-log" data-subject="${ev.subjectId}" style="background:${c.tx}">Log</div>`:''}
+            ${isPast&&!alreadyLogged?`<div class="tt-log" data-action="quick-log" data-subject="${ev.subjectId}">Log</div>`:''}
+            ${alreadyLogged?`<div class="tt-logged-badge">✓</div>`:''}
+          </div>
+          ${isCur?`<div class="tt-progress"><div class="tt-progress-fill" data-period-prog data-start="${ev.start}" data-end="${ev.end}" style="width:${pct}%;background:${c.tx}"></div></div>`:''}
         </div>`;
       }).join('')}</div>`}
     </div>`;
   }
 
+  // Psychology: gentle daily encouragement (varies by time of day + progress)
+  function renderMotto(){
+    const h=now.getHours();
+    const dp=dayProgress(today());
+    if(dp.total===0)return'';
+    if(dp.done===dp.total)return`<div class="tt-motto">You showed up today. That matters.</div>`;
+    if(h<10)return`<div class="tt-motto">Small steps compound. Just start.</div>`;
+    if(dp.pct>=50)return`<div class="tt-motto">Past halfway — keep the momentum.</div>`;
+    return'';
+  }
+
   return`<div class="pg-title">Timetable</div>
-  <div class="tt-tabs">${tabs.map((t,i)=>`<div class="tt-tab${S.ttTab===i?' on':''}" data-action="tt-tab" data-tab="${i}">${t}</div>`).join('')}</div>
+  ${S.ttTab===0?renderFocusCard():''}
+  <div class="tt-tabs">${tabs.map((t,i)=>`<div class="tt-tab${S.ttTab===i?' on':''}" data-action="tt-tab" data-tab="${i}"><span class="tt-tab-ic">${t.icon}</span>${t.label}</div>`).join('')}</div>
   ${daysToShow.map(renderDay).join('')}
+  ${S.ttTab===0?renderMotto():''}
   <div style="margin-top:18px;">
     <label class="import-btn" for="ics-file-input" style="display:inline-flex;background:transparent;color:var(--tx2);border:1.5px solid var(--bd);padding:9px 16px;font-size:13px;cursor:pointer;border-radius:var(--r);">↻ Re-import ICS</label>
   </div>`;

@@ -254,32 +254,72 @@ input,textarea,select{font-family:inherit;}
 .empty-e{font-size:28px;margin-bottom:10px;opacity:.35;}
 .empty-t{font-size:15px;font-weight:500;color:var(--tx);margin-bottom:5px;letter-spacing:-.01em;}
 .empty-s{font-size:13px;color:var(--tx3);font-weight:300;line-height:1.65;}
-.tt-tabs{display:flex;gap:5px;margin-bottom:16px;background:var(--srf);border:1px solid var(--bd);border-radius:var(--rm);padding:4px;box-shadow:var(--sh);}
-.tt-tab{flex:1;padding:9px;border-radius:var(--r);font-size:13px;color:var(--tx2);cursor:pointer;text-align:center;transition:var(--tr);user-select:none;}
+/* ── Focus Card (psychology: reduces overwhelm, answers "what now?") ── */
+.tt-focus{display:flex;align-items:center;gap:14px;padding:16px 18px;border-radius:var(--rl);margin-bottom:18px;position:relative;overflow:hidden;border:1.5px solid var(--bd);background:var(--srf);transition:var(--tr);}
+.tt-focus-now{animation:focusPulse 3s ease-in-out infinite;}
+@keyframes focusPulse{0%,100%{box-shadow:0 0 0 0 transparent;}50%{box-shadow:0 0 0 4px rgba(46,110,72,.08);}}
+.tt-focus-dot{width:10px;height:10px;border-radius:50%;flex-shrink:0;animation:liveBeat 2s ease-in-out infinite;}
+.tt-focus-icon{font-size:22px;flex-shrink:0;width:36px;height:36px;display:flex;align-items:center;justify-content:center;border-radius:50%;background:var(--okL);color:var(--ok);}
+.tt-focus-content{flex:1;min-width:0;}
+.tt-focus-label{font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx3);margin-bottom:3px;}
+.tt-focus-title{font-size:17px;font-weight:600;color:var(--tx);letter-spacing:-.02em;}
+.tt-focus-sub{font-size:12.5px;color:var(--tx3);margin-top:2px;}
+.tt-focus-hint{font-size:12px;color:var(--acc);margin-top:6px;font-style:italic;opacity:.85;}
+.tt-focus-act{padding:8px 16px;border-radius:var(--r);font-size:12px;font-weight:500;cursor:pointer;color:#fff;flex-shrink:0;transition:var(--tr);box-shadow:0 2px 8px rgba(0,0,0,.15);}
+.tt-focus-act:hover{transform:translateY(-1px);box-shadow:0 4px 12px rgba(0,0,0,.2);}
+.tt-focus-logged{font-size:11px;color:var(--ok);font-family:'DM Mono',monospace;letter-spacing:.05em;flex-shrink:0;}
+.tt-focus-bar{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(0,0,0,.06);}
+.tt-focus-bar-fill{height:100%;border-radius:0 3px 3px 0;transition:width .5s linear;}
+.tt-focus-done{background:var(--okL);border-color:var(--ok);}
+.tt-focus-done .tt-focus-label{color:var(--ok);}
+.tt-focus-done .tt-focus-title{color:var(--ok);}
+.tt-focus-free{background:linear-gradient(135deg,var(--srf),var(--accL));border-color:var(--bd);}
+.tt-focus-next{border-left-width:4px;}
+
+/* ── Tabs ── */
+.tt-tabs{display:flex;gap:5px;margin-bottom:18px;background:var(--srf);border:1px solid var(--bd);border-radius:var(--rm);padding:4px;box-shadow:var(--sh);}
+.tt-tab{flex:1;padding:9px;border-radius:var(--r);font-size:13px;color:var(--tx2);cursor:pointer;text-align:center;transition:var(--tr);user-select:none;display:flex;align-items:center;justify-content:center;gap:6px;}
+.tt-tab-ic{font-size:11px;opacity:.7;}
 .tt-tab:hover{color:var(--tx);}
 .tt-tab.on{background:var(--tx);color:var(--bg);font-weight:500;}
-.tt-day-hd{font-family:'DM Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--tx3);margin-bottom:9px;display:flex;justify-content:space-between;}
-.tt-day-hd .today-mark{color:var(--acc);}
-.tt-list{display:flex;flex-direction:column;gap:7px;margin-bottom:18px;}
+
+/* ── Day headers + micro-progress ── */
+.tt-day-hd{font-family:'DM Mono',monospace;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--tx3);margin-bottom:4px;display:flex;justify-content:space-between;}
+.tt-day-hd .today-mark{color:var(--acc);font-weight:600;}
+.tt-day-prog{display:flex;align-items:center;gap:10px;margin-bottom:10px;}
+.tt-day-prog-bar{flex:1;height:4px;background:var(--srf2);border-radius:2px;overflow:hidden;}
+.tt-day-prog-fill{height:100%;background:var(--acc);border-radius:2px;transition:width .6s cubic-bezier(.4,0,.2,1);}
+.tt-day-prog-fill.done{background:var(--ok);}
+.tt-day-prog-text{font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);letter-spacing:.05em;flex-shrink:0;}
+
+/* ── Class list ── */
+.tt-list{display:flex;flex-direction:column;gap:6px;margin-bottom:20px;}
+.tt-empty{padding:14px 0;font-size:13px;color:var(--tx3);font-style:italic;}
 .tt-item{display:flex;align-items:center;gap:12px;background:var(--srf);border:1.5px solid var(--bd);border-radius:var(--rm);padding:13px 16px;transition:var(--tr);position:relative;overflow:hidden;}
-.tt-item::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;}
-.tt-item.now{border-color:var(--ok);background:linear-gradient(100deg,var(--okL),#f0faf4);}
-.tt-item.now::before{background:var(--ok);}
-.tt-item.past{opacity:.55;}
-.tt-item:hover{transform:translateX(2px);}
-.tt-item:hover:not(.past){box-shadow:var(--shM);}
+.tt-item-accent{position:absolute;left:0;top:0;bottom:0;width:4px;border-radius:4px 0 0 4px;}
+.tt-item.now{border-color:transparent;box-shadow:var(--shM);}
+.tt-item.past{opacity:.5;transform:scale(.99);}
+.tt-item.past.logged{opacity:.7;}
+.tt-item.past.logged .tt-name{text-decoration:line-through;text-decoration-color:var(--ok);text-decoration-thickness:1.5px;}
+.tt-item.next-up{border-color:var(--accL);}
+.tt-item:hover:not(.past){transform:translateX(2px);box-shadow:var(--shM);}
 .tt-period{font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);width:13px;flex-shrink:0;margin-left:6px;}
 .tt-info{flex:1;min-width:0;}
 .tt-name{font-size:14px;font-weight:500;color:var(--tx);letter-spacing:-.01em;}
-.tt-item.now .tt-name{color:var(--ok);}
 .tt-meta{font-size:12px;color:var(--tx3);margin-top:2px;}
-.tt-times{font-family:'DM Mono',monospace;font-size:10.5px;color:var(--tx3);text-align:right;flex-shrink:0;line-height:1.6;}
-.tt-log{padding:7px 13px;border-radius:var(--r);font-size:12px;cursor:pointer;transition:var(--tr);flex-shrink:0;background:var(--srf2);color:var(--tx2);border:1px solid var(--bd);letter-spacing:.01em;}
-.tt-item.now .tt-log{background:var(--ok);color:#fff;border-color:var(--ok);box-shadow:0 2px 8px rgba(46,110,72,.25);}
-.tt-log:hover{filter:brightness(.96);}
-.tt-logged{font-size:12px;color:var(--ok);flex-shrink:0;letter-spacing:.01em;}
-.tt-prog{position:absolute;bottom:0;left:0;right:0;height:2px;background:rgba(46,110,72,.12);}
-.tt-prog-fill{height:100%;background:var(--ok);}
+.tt-right{display:flex;align-items:center;gap:10px;flex-shrink:0;}
+.tt-times{font-family:'DM Mono',monospace;font-size:10.5px;color:var(--tx3);text-align:right;line-height:1.6;}
+.tt-time-end{color:var(--tx3);opacity:.6;}
+.tt-log{padding:7px 14px;border-radius:var(--r);font-size:12px;cursor:pointer;transition:var(--tr);background:var(--srf2);color:var(--tx2);border:1px solid var(--bd);letter-spacing:.01em;font-weight:500;}
+.tt-log:hover{background:var(--srf3);transform:translateY(-1px);}
+.tt-log-now{color:#fff;border:none;box-shadow:0 2px 8px rgba(0,0,0,.18);}
+.tt-log-now:hover{filter:brightness(1.1);}
+.tt-logged-badge{width:24px;height:24px;border-radius:50%;background:var(--okL);color:var(--ok);display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;flex-shrink:0;}
+.tt-progress{position:absolute;bottom:0;left:0;right:0;height:3px;background:rgba(0,0,0,.05);}
+.tt-progress-fill{height:100%;border-radius:0 3px 3px 0;transition:width .5s linear;}
+
+/* ── Motto (psychology: gentle, non-preachy encouragement) ── */
+.tt-motto{font-size:13px;color:var(--tx3);text-align:center;padding:16px 0 4px;font-style:italic;letter-spacing:-.01em;opacity:.7;}
 .no-tt-card{background:var(--srf);border:2px dashed var(--bd);border-radius:var(--rl);padding:30px 24px;text-align:center;}
 .no-tt-icon{font-size:32px;margin-bottom:12px;opacity:.4;}
 .no-tt-t{font-size:15px;font-weight:500;color:var(--tx);margin-bottom:6px;}
@@ -735,16 +775,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   transition:width .5s linear;
 }
 
-/* ── Timetable ── */
-.tt-day{margin-bottom:20px;}
-.tt-progress{
-  position:absolute;bottom:0;left:0;right:0;
-  height:3px;background:rgba(46,110,72,.12);
-}
-.tt-progress-fill{
-  height:100%;background:var(--ok);
-  border-radius:0 3px 3px 0;
-}
+/* ── Timetable (day spacing) ── */
+.tt-day{margin-bottom:22px;}
 
 /* ── Period card log button ── */
 .pc-log{
