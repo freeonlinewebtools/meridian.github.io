@@ -387,13 +387,13 @@ let timerInt=null,timerStart=0,timerElap=0,timerRunning=false,timerTarget=25*60;
 function startTimer(){timerStart=Date.now()-timerElap*1000;timerRunning=true;clearInterval(timerInt);timerInt=setInterval(()=>{timerElap=Math.floor((Date.now()-timerStart)/1000);if(timerElap>=timerTarget){timerElap=timerTarget;clearInterval(timerInt);timerRunning=false;renderTimerFast();showToast('Timer done — log your session','⏱');}else renderTimerFast();},500);}
 function pauseTimer(){clearInterval(timerInt);timerRunning=false;timerElap=Math.floor((Date.now()-timerStart)/1000);}
 function resetTimer(){clearInterval(timerInt);timerRunning=false;timerElap=0;renderTimerFast();}
-function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const t=document.getElementById('tt-time');if(t){t.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const b=document.getElementById('tt-bar');if(b)b.style.width=`${Math.min(100,(timerElap/timerTarget)*100)}%`;const l=document.getElementById('tt-lbl');if(l)l.textContent=timerRunning?'Running…':timerElap>0?'Paused':'Ready';}
+function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const t=document.getElementById('tt-time');if(t){t.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const b=document.getElementById('tt-bar');if(b)b.style.width=`${Math.min(100,(timerElap/timerTarget)*100)}%`;const l=document.getElementById('tt-lbl');if(l)l.textContent=timerRunning?'Running…':timerElap>0?'Paused':'Ready';const ring=document.getElementById('tt-ring');if(ring){const R=72,CIRC=2*Math.PI*R,pct=Math.min(100,(timerElap/timerTarget)*100);ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=timerRunning?'var(--acc)':'var(--bdS)';}}
 
 /* ════════════════════════════════
    LIVE UPDATE TICKER
 ════════════════════════════════ */
 let liveTickInt=null;
-function startLiveTick(){clearInterval(liveTickInt);liveTickInt=setInterval(()=>{if(S.data&&(S.view==='dashboard'||S.view==='timetable')){renderLiveElements();}},15000);}
+function startLiveTick(){clearInterval(liveTickInt);liveTickInt=setInterval(()=>{if(S.data&&(S.view==='dashboard'||S.view==='timetable')){renderLiveElements();}},5000);}
 function renderLiveElements(){
   // Update Now/Next card
   const nn=document.getElementById('nownext');
@@ -410,6 +410,38 @@ function renderLiveElements(){
     const nn2=getNowNext(S.data.timetable);
     if(nn2.type==='in-class')cd.textContent=`${nn2.mLeft}m left`;
     else if(nn2.type==='next')cd.textContent=`in ${fmtMins(nn2.mUntil)}`;
+  }
+  // Update vertical day progress bar (timetable view)
+  const dpBar=document.getElementById('day-prog-bar');
+  if(dpBar){
+    const ds=new Date(dpBar.dataset.dayStart),de=new Date(dpBar.dataset.dayEnd),now2=new Date();
+    const span=de-ds;
+    if(span>0){
+      const pct=Math.min(100,Math.max(0,((now2-ds)/span)*100));
+      const fill=dpBar.querySelector('.day-progress-bar-fill');
+      if(fill){
+        fill.style.height=pct+'%';
+        if(pct>=100)fill.classList.add('done');
+      }
+      const lbl=document.getElementById('day-prog-pct');
+      if(lbl){
+        if(pct>=100){lbl.textContent='Complete';lbl.classList.add('done');}
+        else lbl.textContent=Math.round(pct)+'% through';
+      }
+    }
+  }
+  // Update dashboard day progress bar
+  const dashFill=document.getElementById('dash-day-prog-fill');
+  if(dashFill){
+    const ds2=new Date(dashFill.dataset.dayStart),de2=new Date(dashFill.dataset.dayEnd),now3=new Date();
+    const span2=de2-ds2;
+    if(span2>0){
+      const pct2=Math.min(100,Math.max(0,((now3-ds2)/span2)*100));
+      dashFill.style.width=pct2+'%';
+      if(pct2>=100){dashFill.style.background='var(--ok)';}
+      const dashLbl=document.getElementById('dash-day-prog-pct');
+      if(dashLbl){dashLbl.textContent=pct2>=100?'✓':Math.round(pct2)+'%';}
+    }
   }
 }
 
@@ -441,6 +473,7 @@ let S={
   papersSort:'date',        // 'date' / 'subject' / 'title'
   papersData:null,          // loaded papers cache {local:[], thsc:[], hsc:[]}
   papersLoading:false,
+  moreMenu:false,           // mobile "more" menu open
 };
 
 /* ════════════════════════════════
@@ -744,32 +777,40 @@ function renderShell(){
   <div class="topbar">
     <div class="logo">Meri<b>d</b>ian</div>
     <div class="topbar-r">
-      <button class="ib" data-action="open-log" title="Log (L)" style="font-size:20px;color:var(--tx);font-weight:300;">＋</button>
-      <button class="ib" data-action="sync-now" title="Sync">↻<div class="sync-dot" style="display:${sc.apiKey?'':'none'}"></div></button>
-      <button class="ib" data-action="nav-settings">⚙</button>
+      <button class="ib" data-action="open-log" title="Log (L)" style="font-size:18px;color:var(--tx);font-weight:400;">+</button>
+      <button class="ib" data-action="sync-now" title="Sync" style="font-size:15px;">↻<div class="sync-dot" style="display:${sc.apiKey?'':'none'}"></div></button>
+      <button class="ib" data-action="nav-settings" style="font-size:15px;">⚙</button>
     </div>
   </div>
   <div class="wrap">
     <nav class="side dsk">
-      ${[['dashboard','⊞','Dashboard'],['timetable','▦','Timetable'],['history','◫','History'],['progress','↑','Progress'],['stats','↗','Stats'],['papers','📄','Papers'],['timer','◷','Timer']].map(([v,i,l])=>`
+      ${[['dashboard','◉','Dashboard'],['timetable','☰','Timetable'],['history','◔','History'],['progress','△','Progress'],['stats','◇','Stats'],['papers','◧','Papers'],['timer','◷','Timer']].map(([v,i,l])=>`
         <div class="si${S.view===v?' on':''}" data-action="nav-${v}"><span class="ico">${i}</span>${l}${v==='timetable'&&hasTT&&todayClasses>0?`<span class="si-badge">${todayClasses}</span>`:''}</div>`).join('')}
       <div class="si-sec">Account</div>
       <div class="si${S.view==='settings'?' on':''}" data-action="nav-settings"><span class="ico">⚙</span>Settings</div>
-      <div class="side-logbtn" data-action="open-log">＋ Log Session</div>
+      <div class="side-logbtn" data-action="open-log">+ Log Session</div>
     </nav>
     <div class="content" id="page-content">
       <div class="inner">${(vs[S.view]||renderDash)()}</div>
     </div>
   </div>
   <nav class="bnav mob">
-    <div class="bni${S.view==='dashboard'?' on':''}" data-action="nav-dashboard"><span class="bni-ic">⊞</span>Home<div class="bni-dot"></div></div>
-    <div class="bni${S.view==='timetable'?' on':''}" data-action="nav-timetable"><span class="bni-ic">▦</span>Schedule<div class="bni-dot"></div></div>
+    <div class="bni${S.view==='dashboard'?' on':''}" data-action="nav-dashboard"><span class="bni-ic">◉</span>Home<div class="bni-dot"></div></div>
+    <div class="bni${S.view==='timetable'?' on':''}" data-action="nav-timetable"><span class="bni-ic">☰</span>Schedule<div class="bni-dot"></div></div>
     <div class="fab-wrap">
       <div class="fab" data-action="open-log">＋</div>
     </div>
-    <div class="bni${S.view==='papers'?' on':''}" data-action="nav-papers"><span class="bni-ic">📄</span>Papers<div class="bni-dot"></div></div>
-    <div class="bni${S.view==='progress'?' on':''}" data-action="nav-progress"><span class="bni-ic">↑</span>Progress<div class="bni-dot"></div></div>
+    <div class="bni${S.view==='papers'?' on':''}" data-action="nav-papers"><span class="bni-ic">◧</span>Papers<div class="bni-dot"></div></div>
+    <div class="bni${['progress','history','stats','timer','settings'].includes(S.view)?' on':''}" data-action="toggle-more"><span class="bni-ic">⋯</span>More<div class="bni-dot"></div></div>
   </nav>
+  ${S.moreMenu?`<div class="more-menu-overlay" data-action="close-more"></div>
+  <div class="more-menu">
+    <div class="more-item${S.view==='progress'?' on':''}" data-action="more-nav" data-view="progress"><span class="more-item-ic">△</span>Progress</div>
+    <div class="more-item${S.view==='history'?' on':''}" data-action="more-nav" data-view="history"><span class="more-item-ic">◔</span>History</div>
+    <div class="more-item${S.view==='stats'?' on':''}" data-action="more-nav" data-view="stats"><span class="more-item-ic">◇</span>Stats</div>
+    <div class="more-item${S.view==='timer'?' on':''}" data-action="more-nav" data-view="timer"><span class="more-item-ic">◷</span>Timer</div>
+    <div class="more-item${S.view==='settings'?' on':''}" data-action="more-nav" data-view="settings"><span class="more-item-ic">⚙</span>Settings</div>
+  </div>`:''}
   ${S.modal?renderModal():''}
   ${pdfViewerState?renderPdfViewer():''}`;
 }
@@ -844,6 +885,21 @@ function renderNowNext(){
   return'';
 }
 
+function getMotivation(sessions,streak){
+  const h=new Date().getHours();
+  const tMin=todaySess(sessions).reduce((a,s)=>a+s.duration,0);
+  if(tMin>=120)return'Monster session today. Take a break.';
+  if(tMin>=60)return'Solid progress. Keep the momentum.';
+  if(streak>=14)return'Two weeks strong. You\'re built different.';
+  if(streak>=7)return'A full week. Consistency is compounding.';
+  if(h<9)return'Early start? Smart move.';
+  if(h<12)return'Morning sessions hit different.';
+  if(h<17)return'Good time to knock out a session.';
+  if(h<20)return'Evening grind. Finish strong.';
+  if(tMin===0)return'Still time to keep the streak alive.';
+  return'Every session counts.';
+}
+
 function renderDash(){
   const{sessions,subjects,name,year,timetable}=S.data;
   const streak=getStreak(sessions),best=getBest(sessions),risk=isRisk(sessions);
@@ -862,6 +918,30 @@ function renderDash(){
   const todayTT=getTodayTT(timetable||[]);
   const hasTT=(timetable||[]).length>0;
 
+  // Compute day progress for dashboard
+  let dashDayProg='';
+  if(hasTT&&todayTT.length){
+    const dFirst=new Date(todayTT[0].start),dLast=new Date(todayTT[todayTT.length-1].end);
+    const dSpan=dLast-dFirst;
+    if(dSpan>0){
+      const dElapsed=Math.max(0,new Date()-dFirst);
+      const dPct=Math.min(100,Math.max(0,Math.round((dElapsed/dSpan)*100)));
+      const dDone=new Date()>=dLast;
+      dashDayProg=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:10px 14px;background:var(--srf);border:1px solid var(--bd);border-radius:var(--rm);">
+        <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:${dDone?'var(--ok)':'var(--acc)'};">${dDone?'Day complete':'Day progress'}</span>
+            <span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);">${fmtTime(dFirst)} – ${fmtTime(dLast)}</span>
+          </div>
+          <div style="height:4px;background:var(--srf2);border-radius:3px;overflow:hidden;">
+            <div id="dash-day-prog-fill" data-day-start="${todayTT[0].start}" data-day-end="${todayTT[todayTT.length-1].end}" style="height:100%;width:${dPct}%;background:${dDone?'var(--ok)':'var(--acc)'};border-radius:3px;transition:width .8s cubic-bezier(.4,0,.2,1);"></div>
+          </div>
+        </div>
+        <span id="dash-day-prog-pct" style="font-family:'DM Mono',monospace;font-size:11px;font-weight:500;color:${dDone?'var(--ok)':'var(--acc)'};flex-shrink:0;">${dDone?'✓':dPct+'%'}</span>
+      </div>`;
+    }
+  }
+
   // Week dots — last 7 days
   const weekDays=['M','T','W','T','F','S','S'];
   const last7Dates=[];
@@ -874,13 +954,17 @@ function renderDash(){
     return`<div class="wdot${hasSess?' has-session':''}${isT?' is-today':''}" title="${fmtDate(dt)}">${weekDays[dayIdx]}</div>`;
   }).join('');
 
+  const motivation=getMotivation(sessions,streak);
   return`
   <div class="dash-greet">
     <div class="dash-date">${new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
     <div class="dash-name">${greet}</div>
+    <div class="dash-motive">${motivation}</div>
   </div>
 
   ${renderNowNext()}
+
+  ${dashDayProg}
 
   ${avgHpd>0?`<div class="hsc-strip">
     <span class="hsc-lbl">Projection</span>
@@ -985,7 +1069,7 @@ function renderDash(){
   </div>
 
   <div class="sec"><span class="sec-lbl">Recent sessions</span><span class="sec-link" data-action="nav-history">All →</span></div>
-  ${recent.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">Nothing logged yet</div><div class="empty-s">Even 15 minutes counts. Tap + below to log your first session, or press <kbd style="font-family:'DM Mono',monospace;font-size:10px;padding:1px 5px;background:var(--srf2);border:1px solid var(--bd);border-radius:3px;">L</kbd> on desktop.</div></div>`
+  ${recent.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">Nothing logged yet</div><div class="empty-s">Even 15 minutes counts. Tap below to log your first session.</div><div class="empty-action" data-action="open-log">+ Log first session</div></div>`
   :`<div class="sess-list">${recent.map(renderSessRow).join('')}</div>`}`;
 }
 
@@ -999,7 +1083,7 @@ function renderTimetable(){
     <div class="no-tt-card">
       <div class="no-tt-icon">📅</div>
       <div class="no-tt-t">No timetable imported yet</div>
-      <div class="no-tt-s">Import your ICS from Sentral to get live class info, smart study suggestions, automatic subject pre-fill when logging, and a full weekly schedule view.</div>
+      <div class="no-tt-s">Import your ICS from Sentral to see your schedule, get smart study suggestions, and auto-fill subjects when logging.</div>
       <label class="import-btn" for="ics-file-input">↑ Import .ics from Sentral</label>
     </div>`;
   }
@@ -1014,18 +1098,15 @@ function renderTimetable(){
     for(let i=0;i<14&&daysToShow.length<5;i++){if(!isWeekend(d))daysToShow.push(d);d=addDays(d,1);}
   }
 
-  // Psychology: compute day-level micro-progress for Zeigarnik + endowed progress
   function dayProgress(dateStr){
     const evs=getDayTT(tt,dateStr);
     if(!evs.length)return{total:0,done:0,cur:0,pct:0};
     const done=evs.filter(ev=>now>=new Date(ev.end)).length;
     const cur=evs.filter(ev=>now>=new Date(ev.start)&&now<new Date(ev.end)).length;
-    // Endowed progress: count current class as partially done
     const effective=done+(cur?0.5:0);
     return{total:evs.length,done,cur,pct:evs.length?Math.round((effective/evs.length)*100):0};
   }
 
-  // Psychology: focus card — answers "what should I do right now?" (reduces overwhelm)
   function renderFocusCard(){
     const nn=getNowNext(tt);
     const sessions=S.data.sessions||[];
@@ -1033,47 +1114,46 @@ function renderTimetable(){
     const dp=dayProgress(today());
     const logged=todaySess(sessions).length;
 
-    // Day is done — celebration state
     if(nn.type==='done'){
       const totalLogged=todaySess(sessions).reduce((a,s)=>a+s.duration,0);
       return`<div class="tt-focus tt-focus-done">
         <div class="tt-focus-icon">✓</div>
-        <div class="tt-focus-content">
+        <div class="tt-focus-body">
           <div class="tt-focus-label">Day complete</div>
           <div class="tt-focus-title">All ${dp.total} classes finished</div>
-          <div class="tt-focus-sub">${logged?`${logged} session${logged>1?'s':''} logged · ${fmtDur(totalLogged)} studied`:'Log what you learned today to lock it in'}</div>
+          <div class="tt-focus-sub">${logged?`${logged} session${logged>1?'s':''} logged · ${fmtDur(totalLogged)} studied`:'Log what you learned to lock it in'}</div>
         </div>
       </div>`;
     }
 
-    // Currently in class
     if(nn.type==='in-class'){
       const sub=S.data.subjects.find(x=>x.id===nn.ev.subjectId);
       const c=getSubjColor(sub||{color:0});
       const s=new Date(nn.ev.start),e=new Date(nn.ev.end);
       const pct=Math.min(100,((now-s)/(e-s))*100);
       const alreadyLogged=todaySess(sessions).some(sess=>sess.subject===nn.ev.subjectId&&sess.date===today());
-      return`<div class="tt-focus tt-focus-now" style="border-color:${c.bd};background:${c.bg}">
+      return`<div class="tt-focus tt-focus-now" style="--fc-tx:${c.tx};--fc-bg:${c.bg};--fc-bd:${c.bd}">
         <div class="tt-focus-dot" style="background:${c.tx}"></div>
-        <div class="tt-focus-content">
+        <div class="tt-focus-body">
           <div class="tt-focus-label" style="color:${c.tx}">Right now · ${nn.mLeft}m left</div>
           <div class="tt-focus-title" style="color:${c.tx}">${sub?.name||nn.ev.subjectName}</div>
           <div class="tt-focus-sub">${nn.ev.room}${nn.ev.teacher?' · '+nn.ev.teacher:''}</div>
+          <div class="tt-focus-progress">
+            <div class="tt-focus-progress-fill" data-period-prog data-start="${nn.ev.start}" data-end="${nn.ev.end}" style="width:${pct}%;background:${c.tx}"></div>
+          </div>
         </div>
-        ${!alreadyLogged?`<div class="tt-focus-act" data-action="quick-log" data-subject="${nn.ev.subjectId}" style="background:${c.tx}">Log</div>`:`<div class="tt-focus-logged">Logged</div>`}
-        <div class="tt-focus-bar"><div class="tt-focus-bar-fill" data-period-prog data-start="${nn.ev.start}" data-end="${nn.ev.end}" style="width:${pct}%;background:${c.tx}"></div></div>
+        ${!alreadyLogged?`<div class="tt-focus-act" data-action="quick-log" data-subject="${nn.ev.subjectId}" style="background:${c.tx}">Log</div>`:`<div class="tt-focus-check" style="color:${c.tx}">✓</div>`}
       </div>`;
     }
 
-    // Next class coming up
     if(nn.type==='next'){
       const sub=S.data.subjects.find(x=>x.id===nn.ev.subjectId);
       const c=getSubjColor(sub||{color:0});
-      // Study prompt: implementation intention style
       const gap=nn.mUntil;
       const studyHint=gap>=15&&logged<todayEvs.length?`<div class="tt-focus-hint">You have ${fmtMins(gap)} free — review something from earlier?</div>`:'';
-      return`<div class="tt-focus tt-focus-next" style="border-left:4px solid ${c.tx}">
-        <div class="tt-focus-content">
+      return`<div class="tt-focus tt-focus-next">
+        <div class="tt-focus-accent" style="background:${c.tx}"></div>
+        <div class="tt-focus-body">
           <div class="tt-focus-label">Up next · in ${fmtMins(nn.mUntil)}</div>
           <div class="tt-focus-title">${sub?.name||nn.ev.subjectName}</div>
           <div class="tt-focus-sub">${nn.ev.room}${nn.ev.teacher?' · '+nn.ev.teacher:''}</div>
@@ -1082,12 +1162,10 @@ function renderTimetable(){
       </div>`;
     }
 
-    // No school today
     if(nn.type==='no-school'){
       const sub=nn.nextFirst?S.data.subjects.find(x=>x.id===nn.nextFirst.subjectId):null;
-      // Fresh start effect: frame as opportunity, not absence
       return`<div class="tt-focus tt-focus-free">
-        <div class="tt-focus-content">
+        <div class="tt-focus-body">
           <div class="tt-focus-label">No classes today</div>
           <div class="tt-focus-title">Free day — good time to get ahead</div>
           <div class="tt-focus-sub">Next: ${nn.nextDayName}${sub?' starts with '+sub.name:''}</div>
@@ -1098,7 +1176,6 @@ function renderTimetable(){
     return'';
   }
 
-  // Psychology: micro-progress bar for the day (Zeigarnik + endowed progress)
   function renderDayProgress(dateStr){
     const dp=dayProgress(dateStr);
     if(!dp.total)return'';
@@ -1107,11 +1184,43 @@ function renderTimetable(){
       const isPast=now>=new Date(ev.end);
       return isPast&&S.data.sessions.some(s=>s.subject===ev.subjectId&&s.date===dateStr);
     }).length;
-    // Zeigarnik: show partial completion to create pull
     const allDone=dp.done===dp.total;
     return`<div class="tt-day-prog">
       <div class="tt-day-prog-bar"><div class="tt-day-prog-fill${allDone?' done':''}" style="width:${dp.pct}%"></div></div>
       <span class="tt-day-prog-text">${dp.done}/${dp.total} done${loggedCount?` · ${loggedCount} logged`:''}</span>
+    </div>`;
+  }
+
+  function renderDayProgressBar(dateStr){
+    const evs=getDayTT(tt,dateStr);
+    if(!evs.length)return'';
+    const isT=dateStr===today();
+    if(!isT)return'';
+    const first=new Date(evs[0].start),last=new Date(evs[evs.length-1].end);
+    const totalSpan=last-first;
+    if(totalSpan<=0)return'';
+    const elapsed=Math.max(0,now-first);
+    const pct=Math.min(100,Math.max(0,(elapsed/totalSpan)*100));
+    const allDone=now>=last;
+    return`<div class="day-progress-bar" id="day-prog-bar" data-day-start="${evs[0].start}" data-day-end="${evs[evs.length-1].end}">
+      <div class="day-progress-bar-fill${allDone?' done':''}" style="height:${pct}%"></div>
+    </div>`;
+  }
+
+  function renderDayProgressLabel(dateStr){
+    const evs=getDayTT(tt,dateStr);
+    if(!evs.length)return'';
+    const isT=dateStr===today();
+    if(!isT)return'';
+    const first=new Date(evs[0].start),last=new Date(evs[evs.length-1].end);
+    const totalSpan=last-first;
+    if(totalSpan<=0)return'';
+    const elapsed=Math.max(0,now-first);
+    const pct=Math.min(100,Math.max(0,Math.round((elapsed/totalSpan)*100)));
+    const allDone=now>=last;
+    return`<div class="day-progress-label">
+      <span class="day-progress-pct${allDone?' done':''}" id="day-prog-pct">${allDone?'Complete':pct+'% through'}</span>
+      <span class="day-progress-time-range">${fmtTime(first)} – ${fmtTime(last)}</span>
     </div>`;
   }
 
@@ -1120,16 +1229,17 @@ function renderTimetable(){
     const isToday=dateStr===today();
     const dayName=isToday?'Today':dateStr===addDays(today(),1)?'Tomorrow':new Date(dateStr+'T12:00:00').toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'short'});
     const totalHrs=evs.reduce((a,e)=>a+(new Date(e.end)-new Date(e.start))/60000,0)/60;
-
-    // Fresh start: Monday gets special framing
     const dayOfWeek=new Date(dateStr+'T12:00:00').getDay();
     const isMon=dayOfWeek===1&&!isToday;
+    const hasProgressBar=isToday&&evs.length>0;
 
-    return`<div class="tt-day">
+    return`<div class="tt-day${isToday?' tt-day-today':''}">
       <div class="tt-day-hd">
         <span${isToday?' class="today-mark"':''}>${isMon?'Fresh week · ':''}${dayName}</span>
         <span>${totalHrs.toFixed(1).replace('.0','')}h · ${evs.length} class${evs.length!==1?'es':''}</span>
       </div>
+      ${renderDayProgressLabel(dateStr)}
+      ${hasProgressBar?'<div class="day-progress-wrapper">'+renderDayProgressBar(dateStr)+'<div class="day-progress-content">':''}
       ${renderDayProgress(dateStr)}
       ${evs.length===0?`<div class="tt-empty">No classes${isWeekend(dateStr)?' — enjoy your weekend':' scheduled'}.</div>`:`
       <div class="tt-list">${evs.map((ev,idx)=>{
@@ -1140,30 +1250,28 @@ function renderTimetable(){
         const pct=isCur?Math.min(100,((now-s)/(e-s))*100):0;
         const alreadyLogged=S.data.sessions.some(sess=>sess.subject===ev.subjectId&&sess.date===dateStr);
         const durMins=Math.round((e-s)/60000);
-
-        // Upcoming class: show gentle prep cue (implementation intention)
         const isNextUp=!isPast&&!isCur&&idx>0&&now>=new Date(evs[idx-1]?.end);
 
         return`<div class="tt-item${isCur?' now':isPast&&alreadyLogged?' past logged':isPast?' past':''}${isNextUp?' next-up':''}">
           <div class="tt-item-accent" style="background:${c.tx}"></div>
-          <div class="tt-period">${ev.period||'—'}</div>
+          <div class="tt-item-abb" style="background:${c.bg};color:${c.tx};border-color:${c.bd}">${sub?.abbr||ev.period||'—'}</div>
           <div class="tt-info">
             <div class="tt-name">${sub?.name||ev.subjectName}</div>
             <div class="tt-meta">${ev.room}${ev.teacher?' · '+ev.teacher:''}${!isCur&&!isPast?` · ${durMins}m`:''}</div>
           </div>
           <div class="tt-right">
-            <div class="tt-times">${fmtTime(s)}<br><span class="tt-time-end">${fmtTime(e)}</span></div>
+            <div class="tt-times">${fmtTime(s)}<span class="tt-time-sep">–</span>${fmtTime(e)}</div>
             ${isCur&&!alreadyLogged?`<div class="tt-log tt-log-now" data-action="quick-log" data-subject="${ev.subjectId}" style="background:${c.tx}">Log</div>`:''}
             ${isPast&&!alreadyLogged?`<div class="tt-log" data-action="quick-log" data-subject="${ev.subjectId}">Log</div>`:''}
-            ${alreadyLogged?`<div class="tt-logged-badge">✓</div>`:''}
+            ${alreadyLogged?`<div class="tt-logged-badge" style="background:${c.bg};color:${c.tx}">✓</div>`:''}
           </div>
           ${isCur?`<div class="tt-progress"><div class="tt-progress-fill" data-period-prog data-start="${ev.start}" data-end="${ev.end}" style="width:${pct}%;background:${c.tx}"></div></div>`:''}
         </div>`;
       }).join('')}</div>`}
+      ${hasProgressBar?'</div></div>':''}
     </div>`;
   }
 
-  // Psychology: gentle daily encouragement (varies by time of day + progress)
   function renderMotto(){
     const h=now.getHours();
     const dp=dayProgress(today());
@@ -1174,14 +1282,27 @@ function renderTimetable(){
     return'';
   }
 
+  // Today stats summary for timetable
+  function renderTodayStats(){
+    const sessions=S.data.sessions||[];
+    const tMins=dayMins(sessions,today());
+    const dp=dayProgress(today());
+    if(!dp.total&&!tMins)return'';
+    const sessCount=todaySess(sessions).length;
+    return`<div class="tt-stats">
+      <div class="tt-stat"><span class="tt-stat-v">${tMins?fmtDur(tMins):'—'}</span><span class="tt-stat-l">studied</span></div>
+      <div class="tt-stat"><span class="tt-stat-v">${sessCount}</span><span class="tt-stat-l">session${sessCount!==1?'s':''}</span></div>
+      <div class="tt-stat"><span class="tt-stat-v">${dp.done}/${dp.total}</span><span class="tt-stat-l">classes done</span></div>
+    </div>`;
+  }
+
   return`<div class="pg-title">Timetable</div>
-  ${S.ttTab===0?renderFocusCard():''}
   <div class="tt-tabs">${tabs.map((t,i)=>`<div class="tt-tab${S.ttTab===i?' on':''}" data-action="tt-tab" data-tab="${i}"><span class="tt-tab-ic">${t.icon}</span>${t.label}</div>`).join('')}</div>
+  ${S.ttTab===0?renderFocusCard():''}
+  ${S.ttTab===0?renderTodayStats():''}
   ${daysToShow.map(renderDay).join('')}
   ${S.ttTab===0?renderMotto():''}
-  <div style="margin-top:18px;">
-    <label class="import-btn" for="ics-file-input" style="display:inline-flex;background:transparent;color:var(--tx2);border:1.5px solid var(--bd);padding:9px 16px;font-size:13px;cursor:pointer;border-radius:var(--r);">↻ Re-import ICS</label>
-  </div>`;
+  <label class="tt-reimport" for="ics-file-input">↻ Re-import timetable</label>`;
 }
 
 /* ════════════════════════════════
@@ -1194,24 +1315,33 @@ function renderHistory(){
   const byDate={};
   sessions.filter(s=>s.subject!=='grace').forEach(s=>{if(!byDate[s.date])byDate[s.date]=[];byDate[s.date].push(s);});
   const sorted=Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
+  const totalHrs=Math.round(totalMins(sessions)/60*10)/10;
+  const activeDays=new Set(sessions.filter(s=>s.subject!=='grace').map(s=>s.date)).size;
   return`
   <div class="pg-title">History</div>
   <div class="stat3 mb16">
     <div class="stile"><div class="stile-l">Streak</div><div class="stile-v">${getStreak(sessions)}</div><div class="stile-s">days</div></div>
-    <div class="stile"><div class="stile-l">Best streak</div><div class="stile-v">${getBest(sessions)}</div><div class="stile-s">days</div></div>
-    <div class="stile"><div class="stile-l">Active days</div><div class="stile-v">${new Set(sessions.filter(s=>s.subject!=='grace').map(s=>s.date)).size}</div><div class="stile-s">total</div></div>
+    <div class="stile"><div class="stile-l">Best</div><div class="stile-v">${getBest(sessions)}</div><div class="stile-s">days</div></div>
+    <div class="stile"><div class="stile-l">Active</div><div class="stile-v">${activeDays}</div><div class="stile-s">days</div></div>
   </div>
-  <div class="sec mb8"><span class="sec-lbl">Activity · 16 weeks</span></div>
-  <div class="hmap">
-    <div class="hmap-grid">${cells.map(c=>{let cl='h0';if(c.mins>=10&&c.mins<30)cl='h1';else if(c.mins>=30&&c.mins<60)cl='h2';else if(c.mins>=60&&c.mins<120)cl='h3';else if(c.mins>=120)cl='h4';return`<div class="hc ${cl}${c.isT?' htoday':''}" title="${fmtShort(c.date)}: ${c.mins>0?fmtDur(c.mins):'—'}"></div>`;}).join('')}</div>
-    <div class="hleg"><span>Less</span>${['h0','h1','h2','h3','h4'].map(c=>`<div class="hlc ${c}"></div>`).join('')}<span>More</span></div>
+  <div class="card mb16" style="padding:16px 18px;">
+    <div class="sec mb8"><span class="sec-lbl">Activity · 16 weeks</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);">${totalHrs}h total</span></div>
+    <div class="hmap">
+      <div class="hmap-labels">
+        <div class="hmap-inner">
+          <div class="hmap-days"><span>M</span><span>T</span><span>W</span><span>T</span><span>F</span><span>S</span><span>S</span></div>
+          <div class="hmap-grid">${cells.map(c=>{let cl='h0';if(c.mins>=10&&c.mins<30)cl='h1';else if(c.mins>=30&&c.mins<60)cl='h2';else if(c.mins>=60&&c.mins<120)cl='h3';else if(c.mins>=120)cl='h4';return`<div class="hc ${cl}${c.isT?' htoday':''}" title="${fmtShort(c.date)}: ${c.mins>0?fmtDur(c.mins):'—'}"></div>`;}).join('')}</div>
+        </div>
+      </div>
+      <div class="hleg"><span>Less</span>${['h0','h1','h2','h3','h4'].map(c=>`<div class="hlc ${c}"></div>`).join('')}<span>More</span></div>
+    </div>
   </div>
-  <div class="sec-lbl mb12">All sessions</div>
-  ${sorted.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">No sessions yet</div><div class="empty-s">Your study history appears here once you start logging. Press + or <kbd style="font-family:'DM Mono',monospace;font-size:10px;padding:1px 5px;background:var(--srf2);border:1px solid var(--bd);border-radius:3px;">L</kbd> to log a session.</div></div>`:
+  <div class="sec mb12"><span class="sec-lbl">All sessions</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);">${sessions.filter(s=>s.subject!=='grace').length} total</span></div>
+  ${sorted.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">No sessions yet</div><div class="empty-s">Your study history will appear here once you start logging.</div></div>`:
   sorted.map(date=>{
     const ds=byDate[date].sort((a,b)=>b.ts-a.ts);
-    return`<div style="margin-bottom:12px;">
-      <div style="font-family:'DM Mono',monospace;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:var(--tx3);padding-bottom:6px;display:flex;justify-content:space-between;"><span>${fmtDate(date)}</span><span>${fmtDur(ds.reduce((a,s)=>a+s.duration,0))}</span></div>
+    return`<div class="hist-group">
+      <div class="hist-date"><span>${fmtDate(date)}</span><span>${fmtDur(ds.reduce((a,s)=>a+s.duration,0))}</span></div>
       <div class="sess-list">${ds.map(renderSessRow).join('')}</div>
     </div>`;
   }).join('')}`;
@@ -1233,12 +1363,18 @@ function renderStats(){
   const ss=subjects.map(sub=>({...sub,mins:subMinsAll(sessions,sub.id),ct:sessions.filter(s=>s.subject===sub.id).length})).sort((a,b)=>b.mins-a.mins);
   const maxM=ss[0]?.mins||1;
   const last7=getLast7(),maxD=Math.max(...last7.map(d=>dayMins(sessions,d.date)),1);
+  // Consistency: % of last 14 days with a session
+  const consistDays=14;
+  let consistCount=0;
+  for(let i=0;i<consistDays;i++){const d=new Date();d.setDate(d.getDate()-i);const ds=localDate(d);if(sessions.some(s=>s.date===ds&&s.subject!=='grace'))consistCount++;}
+  const consistPct=Math.round((consistCount/consistDays)*100);
+
   return`
   <div class="pg-title">Stats</div>
   <div class="stat-hero">
     <div><div class="sbv">${th}h</div><div class="sbl">Total hours</div></div>
     <div><div class="sbv">${ts}</div><div class="sbl">Sessions</div></div>
-    <div><div class="sbv">${getBest(sessions)}</div><div class="sbl">Best streak</div></div>
+    <div><div class="sbv">${consistPct}%</div><div class="sbl">Consistency</div></div>
     <div><div class="sbv">${avg}m</div><div class="sbl">Avg session</div></div>
   </div>
   <div class="proj-card mb16">
@@ -1737,24 +1873,7 @@ function renderPapers(){
     `<option value="${t}"${S.papersTypeFilter===t?' selected':''}>${t==='All'?'All types':t}</option>`
   ).join('');
 
-  const hasLocal = data.local.length > 0;
-  const localSection = !hasLocal ? `
-  <div class="papers-upload-prompt">
-    <div class="papers-upload-icon">📂</div>
-    <div class="papers-upload-title">Add your own PDFs</div>
-    <div class="papers-upload-sub">Create a <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">papers/</code> folder next to your HTML file, add your PDFs, and create <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">papers/index.json</code> to describe them. PDFs you make with Claude automatically get thumbnails rendered from page 1.</div>
-    <div class="papers-upload-code">[
-  {
-    "file": "math-ext1-perms-t1.pdf",
-    "title": "Perms &amp; Combs — Set 1",
-    "subject": "Maths Ext 1",
-    "unit": "Yr 11",
-    "topics": ["Permutations","Combinations"],
-    "source": "mine",
-    "date": "2025-03"
-  }
-]</div>
-  </div>` : '';
+
 
   const cards = filtered.map(p=>{
     const c = p.color!==undefined ? getSubjColor({color:p.color}) : {bg:'var(--srf2)',tx:'var(--tx3)',bd:'var(--bd)'};
@@ -1811,7 +1930,6 @@ function renderPapers(){
       ${['date','subject','title'].map(s=>`<div class="filter-chip${S.papersSort===s?' on':''}" data-action="papers-sort-chip" data-val="${s}">${s==='date'?'Newest':s==='subject'?'Subject':'Title'}</div>`).join('')}
     </div>
   </div>
-  ${localSection}
   ${filtered.length===0
     ? `<div class="empty"><div class="empty-e">📄</div><div class="empty-t">No papers match</div><div class="empty-s">Try clearing some filters or searching differently.</div></div>`
     : `<div class="papers-grid">${cards}</div>`
@@ -1870,18 +1988,28 @@ function renderPdfViewer(){
 ════════════════════════════════ */
 function renderTimer(){
   const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;
+  const pct=Math.min(100,(timerElap/timerTarget)*100);
+  const R=72,CIRC=2*Math.PI*R;
+  const offset=CIRC-(pct/100)*CIRC;
   return`
   <div class="pg-title">Timer</div>
-  <div class="card" style="padding:0 20px 20px;">
+  <div class="card" style="padding:0 20px 24px;">
     <div class="timer-face">
-      <div class="timer-num${timerRunning?' run':''}" id="tt-time">${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}</div>
-      <div class="timer-status" id="tt-lbl">${timerRunning?'Running…':timerElap>0?'Paused — tap Resume':'Ready'}</div>
+      <div class="timer-ring-wrap">
+        <svg class="timer-ring-svg" width="180" height="180" viewBox="0 0 180 180">
+          <circle cx="90" cy="90" r="${R}" fill="none" stroke="var(--srf2)" stroke-width="6"/>
+          <circle id="tt-ring" cx="90" cy="90" r="${R}" fill="none" stroke="${timerRunning?'var(--acc)':'var(--bdS)'}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;"/>
+        </svg>
+        <div class="timer-ring-center">
+          <div class="timer-num${timerRunning?' run':''}" id="tt-time">${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}</div>
+          <div class="timer-status" id="tt-lbl">${timerRunning?'Running…':timerElap>0?'Paused':'Ready'}</div>
+        </div>
+      </div>
     </div>
-    <div class="tprog"><div class="tbar" id="tt-bar" style="width:${Math.min(100,(timerElap/timerTarget)*100)}%"></div></div>
     <div class="tbtns">
       ${timerRunning
-        ?`<button class="tbtn tbtn-s" data-action="timer-pause">⏸ Pause</button>`
-        :`<button class="tbtn tbtn-p" data-action="timer-start">${timerElap>0?'▶ Resume':'▶ Start'}</button>`}
+        ?`<button class="tbtn tbtn-s" data-action="timer-pause">Pause</button>`
+        :`<button class="tbtn tbtn-p" data-action="timer-start">${timerElap>0?'Resume':'Start'}</button>`}
       <button class="tbtn tbtn-s" data-action="timer-reset">Reset</button>
       ${timerElap>0&&!timerRunning?`<button class="tbtn tbtn-p" style="background:var(--ok);border-color:var(--ok);" data-action="open-log">Log it →</button>`:''}
     </div>
@@ -1904,7 +2032,7 @@ function renderSettings(){
   return`
   <div class="pg-title">Settings</div>
   <div class="sset">
-    <div class="sset-t">Account</div>
+    <div class="sset-t">◉ Account</div>
     <div class="srow"><span class="srow-l">Name</span><input type="text" id="sname" class="srow-v" value="${esc(name)}" maxlength="30" style="text-align:right;border:none;background:transparent;outline:none;font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);"></div>
     <div class="srow"><span class="srow-l">Year</span><select id="syear" style="font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);border:none;background:transparent;outline:none;cursor:pointer;appearance:none;">${[7,8,9,10,11,12].map(y=>`<option value="${y}"${y===year?' selected':''}>Year ${y}</option>`).join('')}</select></div>
     <div class="srow"><span class="srow-l">Exam target</span><span class="srow-v">${getExamDate(year).name} · ${Math.max(0,daysUntil(getExamDate(year).date))}d</span></div>
@@ -1915,7 +2043,7 @@ function renderSettings(){
   </div>
 
   <div class="sset">
-    <div class="sset-t">Timetable (Sentral ICS)</div>
+    <div class="sset-t">☰ Timetable</div>
     <div class="srow" style="flex-direction:column;align-items:flex-start;gap:5px;">
       <span class="srow-l">Import your .ics file from Sentral</span>
       <span style="font-size:12px;color:var(--tx3);font-weight:300;">Settings → Calendar → Download ICS. Re-import whenever your timetable changes. Current: <b style="font-weight:500;">${hasTT?(S.data.timetable.length+' events'):'Not imported'}</b></span>
@@ -1924,7 +2052,7 @@ function renderSettings(){
   </div>
 
   <div class="sset">
-    <div class="sset-t">Subjects</div>
+    <div class="sset-t">◇ Subjects</div>
     <div class="subj-mgr">
       ${subjects.map(sub=>`<div class="subj-item"><span class="subj-abb-s">${sub.abbr}</span><span class="subj-nm">${sub.name}</span><span class="srow-v">${sub.target}m/day</span><span class="subj-del" data-action="del-subj" data-id="${sub.id}">✕</span></div>`).join('')}
       <button class="add-subj" data-action="open-add-subj">＋ Add subject</button>
@@ -1932,7 +2060,7 @@ function renderSettings(){
   </div>
 
   <div class="sset">
-    <div class="sset-t">Social login (Firebase)</div>
+    <div class="sset-t">◈ Social login</div>
     <div class="firebase-setup">
       <strong style="color:var(--tx);">1. Firebase project setup:</strong><ol style="padding-left:16px;margin-top:4px;">
       <li>Go to <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a></li>
@@ -1954,7 +2082,7 @@ function renderSettings(){
     </div>
   </div>
   <div class="sset">
-    <div class="sset-t">Cloud sync (JSONBin — free)</div>
+    <div class="sset-t">↕ Cloud sync</div>
     <div class="jbi-inst"><ol><li>Go to <a href="https://jsonbin.io" target="_blank">jsonbin.io</a> → create free account</li><li>API Keys → copy your Master Key</li><li>Paste below → Save & push</li></ol><div style="margin-top:5px;color:var(--tx3);">On another device: same key → Pull from cloud.</div></div>
     <div class="srow"><span class="srow-l">API Key</span><input type="password" id="sync-key" placeholder="$2a$10…" value="${sc.apiKey}" maxlength="80" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--tx);border:none;background:transparent;outline:none;text-align:right;width:150px;cursor:text;"></div>
     ${sc.binId?`<div class="srow"><span class="srow-l">Bin ID</span><span class="srow-v">${sc.binId.slice(-10)}…</span></div>`:''}
@@ -1966,13 +2094,13 @@ function renderSettings(){
   </div>
 
   <div class="sset">
-    <div class="sset-t">Offline backup</div>
+    <div class="sset-t">↓ Offline backup</div>
     <button class="cpbtn" data-action="toggle-export">${S.showExport?'Hide':'Show export code'}</button>
     ${S.showExport?`<div style="margin-top:8px;"><div class="syncbox">${exportCode(S.data)}</div><button class="cpbtn" data-action="copy-export">Copy to clipboard</button></div>`:''}
   </div>
 
   <div class="sset">
-    <div class="sset-t">Danger</div>
+    <div class="sset-t">⚠ Danger</div>
     <button class="dbtn" data-action="logout">Log out & clear data</button>
   </div>`;
 }
@@ -1999,6 +2127,22 @@ function renderSessRow(s){
 /* ════════════════════════════════
    MODALS
 ════════════════════════════════ */
+function updateLogPreview(){
+  const effDur=S.logCustom&&parseInt(S.logCustom)>0?parseInt(S.logCustom):S.logDur;
+  const selSub=S.data?.subjects.find(s=>s.id===S.logSub);
+  // Update preview card
+  const prevDur=document.querySelector('.log-preview-dur');
+  if(prevDur)prevDur.textContent=fmtDur(effDur);
+  const prevConf=document.querySelector('.log-preview-conf');
+  if(prevConf)prevConf.textContent=`${CE[S.logConf-1]||'🙂'} ${CONF[S.logConf-1]||'OK'}`;
+  // Update submit button text
+  const btn=document.querySelector('.log-submit');
+  if(btn&&selSub){
+    btn.textContent=`Log ${fmtDur(effDur)} of ${selSub.name}`;
+    btn.classList.add('ready');
+  }
+}
+
 function renderModal(){
   if(S.modal==='log')return renderLogModal();
   if(S.modal==='addsubj')return renderAddSubjModal();
@@ -2017,6 +2161,7 @@ function renderLogTestModal(){
     <div class="modal">
       <div class="modal-header">
         <div class="mhandle" data-action="close-modal"></div>
+        <div class="modal-close-x" data-action="close-modal">✕</div>
         <div class="mtitle">Log test score</div>
         <div class="msub">Record a result. Meridian will use it to predict your next score.</div>
       </div>
@@ -2058,7 +2203,7 @@ function renderLogTestModal(){
         <input class="minp" id="test-next-name" type="text" placeholder="e.g. Trial HSC" value="" maxlength="60" style="margin-bottom:18px;">
 
         ${S.logErr?`<div class="merr">${S.logErr}</div>`:''}
-        <button class="log-submit" data-action="submit-test">Save Score</button>
+        <button class="log-submit ready" data-action="submit-test">Save Score</button>
         <div class="mcancel" data-action="close-modal">Cancel</div>
       </div>
     </div>
@@ -2066,14 +2211,30 @@ function renderLogTestModal(){
 }
 
 function renderLogModal(){
-  const{subjects}=S.data;
+  const{subjects,sessions}=S.data;
   const tElap=timerElap>0&&!timerRunning?Math.max(5,Math.ceil(timerElap/60)):null;
   const selSub=subjects.find(s=>s.id===S.logSub);
   const topics=selSub?getTopicsForSubject(selSub):[];
+  const effDur=S.logCustom&&parseInt(S.logCustom)>0?parseInt(S.logCustom):S.logDur;
+
+  // Live preview data
+  const prevSubName=selSub?.name||'—';
+  const prevDur=fmtDur(effDur);
+  const prevConf=CE[S.logConf-1]||'🙂';
+  const prevTopic=S.logTopic||'';
+  const isReady=!!S.logSub;
+
+  // Today's progress per subject
+  function subProgress(sub){
+    const m=subMinsToday(sessions,sub.id);
+    return m>0?fmtDur(m):'';
+  }
+
   return`<div class="overlay" data-action="close-modal-out">
     <div class="modal">
       <div class="modal-header">
         <div class="mhandle" data-action="close-modal"></div>
+        <div class="modal-close-x" data-action="close-modal">✕</div>
         <div style="display:flex;align-items:baseline;justify-content:space-between;">
           <div class="mtitle">Log a session</div>
           <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);letter-spacing:.08em;">${new Date().toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})}</div>
@@ -2081,13 +2242,30 @@ function renderLogModal(){
         <div class="msub">${tElap?`⏱ Timer ran for <strong>${fmtDur(tElap)}</strong> — duration pre-filled.`:'Even 15 minutes. Just log it.'}</div>
       </div>
       <div class="modal-body">
+
+        ${isReady?`<div class="log-preview">
+          <div class="log-preview-row">
+            <span class="log-preview-sub" style="background:${getSubjColor(selSub).bg};color:${getSubjColor(selSub).tx};border-color:${getSubjColor(selSub).bd};">${selSub.abbr}</span>
+            <span class="log-preview-name">${prevSubName}</span>
+            ${prevTopic?`<span class="log-preview-topic">${prevTopic}</span>`:''}
+          </div>
+          <div class="log-preview-stats">
+            <span class="log-preview-dur">${prevDur}</span>
+            <span class="log-preview-conf">${prevConf} ${CONF[S.logConf-1]}</span>
+          </div>
+        </div>`:''}
+
         <div class="mlbl">Subject</div>
         <div class="sub-chips-grid">
           ${subjects.map(sub=>{
             const c=getSubjColor(sub);
+            const prog=subProgress(sub);
             return`<div class="sub-chip-item${S.logSub===sub.id?' on':''}" data-action="sel-sub" data-sub="${sub.id}">
               <div class="sub-chip-abb" style="${S.logSub===sub.id?'':'background:'+c.bg+';color:'+c.tx+';border-color:'+c.bd+';'}">${sub.abbr}</div>
-              <div class="sub-chip-name">${sub.name}</div>
+              <div style="flex:1;min-width:0;">
+                <div class="sub-chip-name">${sub.name}</div>
+                ${prog?`<div class="sub-chip-prog">${prog} today</div>`:''}
+              </div>
             </div>`;
           }).join('')}
         </div>
@@ -2110,7 +2288,7 @@ function renderLogModal(){
           <div class="slval" id="dur-disp">${fmtDur(S.logDur)}</div>
         </div>
         <div class="cust-row">
-          <input type="number" id="cust-dur" placeholder="—" min="1" max="600" value="${S.logCustom}">
+          <input type="number" id="cust-dur" placeholder="—" min="1" max="600" value="${S.logCustom}" inputmode="numeric">
           <span>min (exact)</span>
         </div>
 
@@ -2122,12 +2300,13 @@ function renderLogModal(){
           </div>`).join('')}
         </div>
 
-        <div class="mlbl">Note <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional</span></div>
-        <textarea class="noteinp" id="log-note" placeholder="What did you cover? Any blockers?" maxlength="200">${S.logNote}</textarea>
+        <div class="log-note-toggle" id="log-note-toggle" data-action="toggle-note">${S.logNote?'Note':'+ Add note'}</div>
+        <div class="log-note-wrap${S.logNote||S._noteOpen?' open':''}" id="log-note-wrap">
+          <textarea class="noteinp" id="log-note" placeholder="What did you cover? Any blockers?" maxlength="200">${S.logNote}</textarea>
+        </div>
 
         ${S.logErr?`<div class="merr">${S.logErr}</div>`:''}
-        <button class="log-submit" data-action="submit-log">Log Session</button>
-        <div class="mcancel" data-action="close-modal">Cancel</div>
+        <button class="log-submit${isReady?' ready':''}" data-action="submit-log">${isReady?`Log ${prevDur} of ${prevSubName}`:'Select a subject to log'}</button>
       </div>
     </div>
   </div>`;
@@ -2138,6 +2317,7 @@ function renderAddSubjModal(){
     <div class="modal">
       <div class="modal-header">
         <div class="mhandle" data-action="close-modal"></div>
+        <div class="modal-close-x" data-action="close-modal">✕</div>
         <div class="mtitle">Add subject</div>
         <div class="msub">Track any subject — appears on your dashboard immediately.</div>
       </div>
@@ -2149,7 +2329,7 @@ function renderAddSubjModal(){
         <div class="mlbl">Daily study target (minutes)</div>
         <input class="minp" id="ns-target" type="number" placeholder="60" min="5" max="600" value="${S.newTarget}" style="margin-bottom:18px;">
         ${S.logErr?`<div class="merr">${S.logErr}</div>`:''}
-        <button class="log-submit" data-action="save-subj">Add Subject</button>
+        <button class="log-submit ready" data-action="save-subj">Add Subject</button>
         <div class="mcancel" data-action="close-modal">Cancel</div>
       </div>
     </div>
@@ -2277,8 +2457,8 @@ const A={
     render();
   },
 
-  'nav-dashboard':()=>{S.view='dashboard';S.modal=null;render();},
-  'nav-timetable':()=>{S.view='timetable';S.modal=null;render();},
+  'nav-dashboard':()=>{S.view='dashboard';S.modal=null;S.moreMenu=false;render();},
+  'nav-timetable':()=>{S.view='timetable';S.modal=null;S.moreMenu=false;render();},
   'nav-history':()=>{S.view='history';S.modal=null;render();},
   'nav-stats':()=>{S.view='stats';S.modal=null;render();},
   'nav-timer':()=>{S.view='timer';S.modal=null;render();},
@@ -2287,14 +2467,14 @@ const A={
   'tt-tab':(btn)=>{S.ttTab=parseInt(btn.dataset.tab);render();},
 
   'open-log':()=>{
-    S.modal='log';S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;
+    S.modal='log';S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;S._noteOpen=false;
     S.logDur=timerElap>0&&!timerRunning?Math.max(5,Math.ceil(timerElap/60)):45;
     S.logSub=S.data.timetable?getSmartSubject(S.data.timetable,S.data.subjects):null;
-    render();
+    document.body.classList.add('modal-open');render();
   },
-  'quick-log':(btn)=>{S.modal='log';S.logSub=btn.dataset.subject;S.logDur=45;S.logConf=3;S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;render();},
-  'close-modal':()=>{S.modal=null;render();},
-  'close-modal-out':(btn,e)=>{if(e.target.classList.contains('overlay')){S.modal=null;render();}},
+  'quick-log':(btn)=>{S.modal='log';S.logSub=btn.dataset.subject;S.logDur=45;S.logConf=3;S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;S._noteOpen=false;document.body.classList.add('modal-open');render();},
+  'close-modal':()=>{S.modal=null;document.body.classList.remove('modal-open');render();},
+  'close-modal-out':(btn,e)=>{if(e.target.classList.contains('overlay')){S.modal=null;document.body.classList.remove('modal-open');render();}},
 
   'sel-sub':(btn)=>{
     S.logSub=btn.dataset.sub;S.logTopic=null;
@@ -2323,12 +2503,25 @@ const A={
     const sl=document.getElementById('dur-sl');if(sl)sl.value=S.logDur;
     const dd=document.getElementById('dur-disp');if(dd)dd.textContent=fmtDur(S.logDur);
     const ci=document.getElementById('cust-dur');if(ci)ci.value='';
+    updateLogPreview();
   },
-  'sel-conf':(btn)=>{S.logConf=parseInt(btn.dataset.conf);document.querySelectorAll('[data-action=sel-conf]').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.conf)===S.logConf));},
+  'sel-conf':(btn)=>{
+    S.logConf=parseInt(btn.dataset.conf);
+    document.querySelectorAll('[data-action=sel-conf]').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.conf)===S.logConf));
+    updateLogPreview();
+  },
 
   'sel-topic':(btn)=>{
     S.logTopic=btn.dataset.topic||null;
     document.querySelectorAll('.topic-chip').forEach(el=>el.classList.toggle('on',el.dataset.topic===btn.dataset.topic));
+  },
+  'toggle-note':()=>{
+    S._noteOpen=!S._noteOpen;
+    const wrap=document.getElementById('log-note-wrap');
+    const tog=document.getElementById('log-note-toggle');
+    if(wrap){wrap.classList.toggle('open',S._noteOpen);}
+    if(tog&&S._noteOpen){tog.textContent='Note';}
+    if(S._noteOpen)setTimeout(()=>document.getElementById('log-note')?.focus(),100);
   },
 
   'submit-log':()=>{
@@ -2341,7 +2534,7 @@ const A={
     const dur=cust&&parseInt(cust)>0?parseInt(cust):S.logDur;
     const sess={id:uid(),date:today(),subject:S.logSub,duration:dur,confidence:S.logConf,note,topic:S.logTopic||null,ts:Date.now()};
     S.data.sessions.push(sess);saveLocal(S.data);triggerSync();
-    S.modal=null;S.logTopic=null;
+    S.modal=null;S.logTopic=null;document.body.classList.remove('modal-open');
     const sub=S.data.subjects.find(x=>x.id===S.logSub);
     const topicStr=sess.topic?` · ${sess.topic}`:'';
     const msgs=[
@@ -2363,12 +2556,15 @@ const A={
   },
   'show-pin-entry':()=>{S.showPinEntry=true;S.loginMode='login';render();setTimeout(()=>document.getElementById('li-pin')?.focus(),60);},
 
-  'nav-progress':()=>{S.view='progress';S.modal=null;render();},
+  'toggle-more':()=>{S.moreMenu=!S.moreMenu;render();},
+  'close-more':()=>{S.moreMenu=false;render();},
+  'more-nav':(btn)=>{const v=btn.dataset.view;S.view=v;S.moreMenu=false;S.modal=null;render();if(v==='papers'&&!S.papersData&&!S.papersLoading){S.papersLoading=true;loadPapersData().then(d=>{S.papersData=d;S.papersLoading=false;if(S.view==='papers')render();});}},
+  'nav-progress':()=>{S.view='progress';S.modal=null;S.moreMenu=false;render();},
   'prog-tab':(btn)=>{S.progTab=parseInt(btn.dataset.tab);render();},
 
   // ── Papers library ──
   'nav-papers':()=>{
-    S.view='papers';S.modal=null;
+    S.view='papers';S.modal=null;S.moreMenu=false;
     // Kick off load if not cached
     if(!S.papersData && !S.papersLoading){
       S.papersLoading=true;
@@ -2424,7 +2620,7 @@ const A={
     S.testSub=null;S.testScore='';S.testOutOf=100;
     S.testName='';S.testType='Test';S.testDate=today();
     S.testNextDate='';S.logErr='';
-    render();
+    document.body.classList.add('modal-open');render();
   },
 
   'sel-test-sub':(btn)=>{
@@ -2466,7 +2662,7 @@ const A={
     };
     S.data.tests.push(t);
     saveLocal(S.data);triggerSync();
-    S.modal=null;
+    S.modal=null;document.body.classList.remove('modal-open');
     const sub=S.data.subjects.find(x=>x.id===S.testSub);
     const g=getTestGrade(pct);
     render();
@@ -2553,7 +2749,7 @@ const A={
     S.data.name=name;S.data.year=year;saveLocal(S.data);triggerSync();render();showToast('Saved.');
   },
 
-  'open-add-subj':()=>{S.modal='addsubj';S.newName='';S.newAbbr='';S.newTarget=60;S.logErr='';render();},
+  'open-add-subj':()=>{S.modal='addsubj';S.newName='';S.newAbbr='';S.newTarget=60;S.logErr='';document.body.classList.add('modal-open');render();},
   'save-subj':()=>{
     const name=document.getElementById('ns-name')?.value?.trim();
     const abbr=document.getElementById('ns-abbr')?.value?.trim().toUpperCase();
@@ -2748,10 +2944,12 @@ function attach(){
       const d=document.getElementById('dur-disp');if(d)d.textContent=fmtDur(S.logDur);
       document.querySelectorAll('.dchip,.dur-pill').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.dur)===S.logDur));
       const ci=document.getElementById('cust-dur');if(ci)ci.value='';
+      updateLogPreview();
     }
     if(e.target.id==='cust-dur'){
       S.logCustom=e.target.value;const v=parseInt(e.target.value);
       if(v>0){document.querySelectorAll('.dchip,.dur-pill').forEach(el=>el.classList.remove('on'));const d=document.getElementById('dur-disp');if(d)d.textContent=fmtDur(v);const sl=document.getElementById('dur-sl');if(sl)sl.value=Math.min(240,v);}
+      updateLogPreview();
     }
     if(e.target.id==='log-note')S.logNote=e.target.value;
     if(e.target.id==='li-pin')S.loginPin=e.target.value;
@@ -2801,10 +2999,15 @@ function attach(){
       if(document.getElementById('li-pin')){A['login']();return;}
       if(document.getElementById('reg-name')||document.querySelector('.pin-digit')){A['reg-next']();return;}
     }
+  });
+
+  // Global keyboard shortcuts — on document so they always work
+  document.addEventListener('keydown',e=>{
     if(e.key==='l'&&!S.modal&&S.data&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){A['open-log']();}
     if(e.key==='Escape'){
       if(pdfViewerState){A['close-pdf']();return;}
-      if(S.modal){S.modal=null;render();}
+      if(S.modal){S.modal=null;document.body.classList.remove('modal-open');render();return;}
+      if(S.moreMenu){S.moreMenu=false;render();return;}
       if(S.tutStep){S.tutStep=0;document.getElementById('tut-overlay')?.remove();}
     }
   });
@@ -2812,6 +3015,37 @@ function attach(){
   // ICS file input
   const icsInput=document.getElementById('ics-file-input');
   icsInput.addEventListener('change',e=>{const f=e.target.files?.[0];if(f)handleICSFile(f);icsInput.value='';});
+
+  // ── Swipe-to-dismiss modals on mobile ──
+  let swipeStartY=0,swipeModal=null,swipeDelta=0;
+  root.addEventListener('touchstart',e=>{
+    const modal=e.target.closest('.modal');
+    if(!modal)return;
+    // Only initiate swipe from the top part or handle
+    const rect=modal.getBoundingClientRect();
+    const touchY=e.touches[0].clientY;
+    if(touchY-rect.top>80&&!e.target.closest('.mhandle'))return;
+    swipeStartY=e.touches[0].clientY;swipeModal=modal;swipeDelta=0;
+  },{passive:true});
+  root.addEventListener('touchmove',e=>{
+    if(!swipeModal)return;
+    swipeDelta=e.touches[0].clientY-swipeStartY;
+    if(swipeDelta>0){
+      swipeModal.classList.add('swiping');
+      swipeModal.style.transform=`translateY(${swipeDelta}px)`;
+    }
+  },{passive:true});
+  root.addEventListener('touchend',()=>{
+    if(!swipeModal)return;
+    if(swipeDelta>100){
+      swipeModal.classList.add('dismiss');
+      setTimeout(()=>{S.modal=null;document.body.classList.remove('modal-open');render();},250);
+    }else if(swipeModal){
+      swipeModal.classList.remove('swiping');
+      swipeModal.style.transform='';
+    }
+    swipeModal=null;swipeDelta=0;
+  },{passive:true});
 }
 
 // Shared auth result handler (used by popup and redirect flows)
