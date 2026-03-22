@@ -436,6 +436,7 @@ let S={
   papersSubFilter:'All',    // subject filter
   papersYrFilter:'All',     // 'All' / 'Yr 11' / 'Yr 12'
   papersSrcFilter:'All',    // 'All' / 'Mine' / 'thsconline' / 'HSC Official'
+  papersTypeFilter:'All',   // 'All' / 'Paper' / 'Assignment' / 'Test' / 'Marking Scheme'
   papersSearch:'',
   papersSort:'date',        // 'date' / 'subject' / 'title'
   papersData:null,          // loaded papers cache {local:[], thsc:[], hsc:[]}
@@ -627,17 +628,13 @@ function renderRegister(){
       <div class="auth-step-panel">
         <div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);margin-bottom:10px;">Step 2 of 4 — Security</div>
         <div style="font-family:'Cormorant',serif;font-size:28px;font-weight:300;color:var(--tx);margin-bottom:6px;">Create a PIN</div>
-        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:24px;line-height:1.5;">4–6 digits. Used to unlock Meridian on this device. No account, no email — just a PIN.</div>
-        <div class="fld" style="margin-bottom:6px;">
-          <label class="flbl">Your PIN</label>
-          <div class="pin-row">
-            ${[0,1,2,3].map(i=>`<input class="pin-digit" id="pd-${i}" type="password" inputmode="numeric" maxlength="1" data-idx="${i}">`).join('')}
-          </div>
+        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:28px;line-height:1.5;">4 digits to unlock Meridian on this device.</div>
+        <div class="pin-row">
+          ${[0,1,2,3].map(i=>`<input class="pin-digit" id="pd-${i}" type="password" inputmode="numeric" maxlength="1" placeholder="·" data-idx="${i}">`).join('')}
         </div>
-        <div class="pin-hint">Tap the first box and type your 4-digit PIN</div>
+        <div class="pin-hint">Your data stays on this device — PIN is just a local lock.</div>
         ${S.loginErr?`<div class="aerr">${S.loginErr}</div>`:''}
         <button class="abtn" data-action="reg-next">Continue →</button>
-        <div style="margin-top:10px;font-size:12px;color:var(--tx3);text-align:center;line-height:1.5;padding:10px;background:var(--srf2);border-radius:var(--r);">🔒 Your data stays local. PIN is only for this device — not a password manager entry.</div>
       </div>`;
 
   } else if(step===3){
@@ -1139,7 +1136,6 @@ function renderStats(){
 function renderProgress(){
   const{sessions,subjects}=S.data;
   const real=sessions.filter(s=>s.subject!=='grace');
-  const tabs=['Confidence','Topics','Momentum'];
 
   function renderConfidenceTab(){
     if(real.length<3) return`<div class="empty"><div class="empty-e">📈</div><div class="empty-t">Not enough data yet</div><div class="empty-s">Log a few sessions with confidence ratings — your trends will appear here.</div></div>`;
@@ -1410,10 +1406,10 @@ function renderProgress(){
   }
 
   const content=[renderConfidenceTab,renderScoresTab,renderTopicsTab,renderMomentumTab][S.progTab]?.();
-  const tabs=['Confidence','Scores','Topics','Momentum'];
+  const progTabs=['Confidence','Scores','Topics','Momentum'];
   return`
   <div class="pg-title">Progress</div>
-  <div class="prog-tabs">${tabs.map((t,i)=>`<div class="prog-tab${S.progTab===i?' on':''}" data-action="prog-tab" data-tab="${i}">${t}</div>`).join('')}</div>
+  <div class="prog-tabs">${progTabs.map((t,i)=>`<div class="prog-tab${S.progTab===i?' on':''}" data-action="prog-tab" data-tab="${i}">${t}</div>`).join('')}</div>
   ${content}`;
 }
 
@@ -1449,17 +1445,18 @@ async function loadPapersData(force=false){
   if(papersCache && !force) return papersCache;
   const result = {local:[], thsc:[], hsc:[]};
 
-  // 1. Load local papers/index.json
+  // 1. Load local papers/index.json (optional — skip if folder doesn't exist)
   try {
-    const r = await fetch(window.PAPERS_DIR + 'index.json', {cache:'no-cache'});
-    if(r.ok){
+    const head = await fetch(window.PAPERS_DIR + 'index.json', {method:'HEAD'});
+    if(head.ok){
+      const r = await fetch(window.PAPERS_DIR + 'index.json', {cache:'no-cache'});
       const items = await r.json();
       result.local = items.map(p=>({
         ...p,
         id: 'local-'+p.file,
         url: window.PAPERS_DIR + p.file,
         source: 'mine',
-        thumbUrl: null, // rendered by PDF.js
+        thumbUrl: null,
       }));
     }
   } catch(e){}
@@ -1571,6 +1568,7 @@ function renderPapers(){
       if(p.unit && !p.unit.includes(yr.replace('Yr ',''))) return false;
     }
     if(S.papersSrcFilter !== 'All' && p.source !== S.papersSrcFilter) return false;
+    if(S.papersTypeFilter !== 'All' && (p.type||'Paper') !== S.papersTypeFilter) return false;
     if(S.papersSearch){
       const q = S.papersSearch.toLowerCase();
       const haystack = (p.title+' '+(p.subject||'')+' '+(p.topics||[]).join(' ')+' '+(p.year||'')).toLowerCase();
@@ -1589,19 +1587,22 @@ function renderPapers(){
   // Subject options from data
   const allSubjects = [...new Set(all.map(p=>p.subject).filter(Boolean))].sort();
 
-  // Filter chips for subjects
-  const subjectChips = ['All',...allSubjects].map(s=>
-    `<div class="filter-chip${S.papersSubFilter===s?' on':''}" data-action="papers-filter-sub" data-val="${s}">${s}</div>`
+  // Filter dropdowns
+  const subjectOpts = ['All',...allSubjects].map(s=>
+    `<option value="${s}"${S.papersSubFilter===s?' selected':''}>${s}</option>`
   ).join('');
 
-  // Source chips
-  const srcChips = ['All','mine','thsconline','HSC Official'].map(s=>
-    `<div class="filter-chip src-${s.replace(' ','').toLowerCase()}${S.papersSrcFilter===s?' on':''}" data-action="papers-filter-src" data-val="${s}">${s==='mine'?'My Papers':s==='thsconline'?'thsconline':s}</div>`
+  const srcOpts = ['All','mine','thsconline','HSC Official'].map(s=>
+    `<option value="${s}"${S.papersSrcFilter===s?' selected':''}>${s==='All'?'All sources':s==='mine'?'My Papers':s==='thsconline'?'thsconline':'HSC Official'}</option>`
   ).join('');
 
-  // Year chips
-  const yrChips = ['All','Yr 11','Yr 12'].map(y=>
-    `<div class="filter-chip${S.papersYrFilter===y?' on':''}" data-action="papers-filter-yr" data-val="${y}">${y}</div>`
+  const yrOpts = ['All','Yr 11','Yr 12'].map(y=>
+    `<option value="${y}"${S.papersYrFilter===y?' selected':''}>${y==='All'?'All years':y}</option>`
+  ).join('');
+
+  const allTypes = [...new Set(all.map(p=>p.type||'Paper').filter(Boolean))].sort();
+  const typeOpts = ['All',...allTypes].map(t=>
+    `<option value="${t}"${S.papersTypeFilter===t?' selected':''}>${t==='All'?'All types':t}</option>`
   ).join('');
 
   const hasLocal = data.local.length > 0;
@@ -1666,20 +1667,17 @@ function renderPapers(){
       <input id="papers-search-inp" type="search" placeholder="Search papers, topics, year…" value="${S.papersSearch}" data-action="papers-search">
     </div>
     <div class="filter-row">
-      ${subjectChips}
-      <div class="filter-sep"></div>
-      ${yrChips}
-      <div class="filter-sep"></div>
-      ${srcChips}
+      <select class="papers-filter-dd" id="pf-subject">${subjectOpts}</select>
+      <select class="papers-filter-dd" id="pf-year">${yrOpts}</select>
+      <select class="papers-filter-dd" id="pf-type">${typeOpts}</select>
+      <select class="papers-filter-dd" id="pf-source">${srcOpts}</select>
     </div>
   </div>
   <div class="papers-sort-row">
     <span class="papers-count">${filtered.length} paper${filtered.length!==1?'s':''}</span>
-    <select class="sort-select" id="papers-sort-sel" data-action="papers-sort">
-      <option value="date"${S.papersSort==='date'?' selected':''}>Newest first</option>
-      <option value="subject"${S.papersSort==='subject'?' selected':''}>By subject</option>
-      <option value="title"${S.papersSort==='title'?' selected':''}>By title</option>
-    </select>
+    <div class="sort-chips">
+      ${['date','subject','title'].map(s=>`<div class="filter-chip${S.papersSort===s?' on':''}" data-action="papers-sort-chip" data-val="${s}">${s==='date'?'Newest':s==='subject'?'Subject':'Title'}</div>`).join('')}
+    </div>
   </div>
   ${localSection}
   ${filtered.length===0
@@ -1718,14 +1716,19 @@ function renderPaperThumbs(){
 
 function renderPdfViewer(){
   if(!pdfViewerState) return '';
+  const src=esc(pdfViewerState.viewUrl||pdfViewerState.url);
   return`<div class="pdf-viewer-overlay" id="pdf-viewer">
     <div class="pdf-viewer-bar">
       <div class="pdf-close" data-action="close-pdf">✕</div>
       <div class="pdf-viewer-title">${esc(pdfViewerState.title)}</div>
-      <a class="pdf-viewer-btn open" href="${esc(pdfViewerState.url)}" target="_blank" rel="noopener">Open ↗</a>
+      <div class="pdf-viewer-actions">
+        <div class="pdf-viewer-btn" data-action="pdf-print" title="Print">🖨</div>
+        <div class="pdf-viewer-btn" data-action="pdf-download" title="Download">↓</div>
+        <div class="pdf-viewer-btn" data-action="pdf-newtab" title="Open in new tab">↗</div>
+      </div>
     </div>
     <div class="pdf-viewer-frame">
-      <iframe src="${esc(pdfViewerState.url)}" title="${esc(pdfViewerState.title)}"></iframe>
+      <iframe src="${src}" title="${esc(pdfViewerState.title)}"></iframe>
     </div>
   </div>`;
 }
@@ -2246,17 +2249,37 @@ const A={
   'papers-filter-sub':(btn)=>{S.papersSubFilter=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
   'papers-filter-yr':(btn)=>{S.papersYrFilter=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
   'papers-filter-src':(btn)=>{S.papersSrcFilter=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
-  'papers-sort':(btn)=>{S.papersSort=btn.value||document.getElementById('papers-sort-sel')?.value||'date';render();setTimeout(renderPaperThumbs,200);},
+  'papers-sort-chip':(btn)=>{S.papersSort=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
+  'papers-filter-type':(btn)=>{S.papersTypeFilter=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
   'papers-search':()=>{/* handled by input listener */},
   'papers-reload':()=>{papersCache=null;S.papersData=null;S.papersLoading=true;render();loadPapersData(true).then(d=>{S.papersData=d;S.papersLoading=false;render();setTimeout(renderPaperThumbs,200);});},
 
   'open-paper':(btn)=>{
-    pdfViewerState={url:btn.dataset.url,title:btn.dataset.title};
-    // Re-render shell to show viewer overlay
+    const url=btn.dataset.url;
+    let viewUrl=url;
+    // External URLs — proxy through Google Docs viewer for iframe
+    try{
+      const u=new URL(url,location.href);
+      if(u.origin!==location.origin){
+        viewUrl='https://docs.google.com/gview?url='+encodeURIComponent(url)+'&embedded=true';
+      }
+    }catch(e){}
+    pdfViewerState={url,viewUrl,title:btn.dataset.title};
     const app=document.getElementById('app');
     if(app) app.insertAdjacentHTML('beforeend', renderPdfViewer());
-    // Focus close button
     setTimeout(()=>document.querySelector('.pdf-close')?.focus(),50);
+  },
+  'pdf-print':()=>{
+    const iframe=document.querySelector('.pdf-viewer-frame iframe');
+    if(iframe){try{iframe.contentWindow.print();}catch(e){window.open(pdfViewerState?.url,'_blank');}}
+  },
+  'pdf-download':()=>{
+    if(!pdfViewerState?.url)return;
+    const a=document.createElement('a');a.href=pdfViewerState.url;a.download='';a.target='_blank';a.rel='noopener';
+    document.body.appendChild(a);a.click();a.remove();
+  },
+  'pdf-newtab':()=>{
+    if(pdfViewerState?.url) window.open(pdfViewerState.url,'_blank','noopener');
   },
   'close-pdf':()=>{
     pdfViewerState=null;
@@ -2333,25 +2356,17 @@ const A={
     if(!window.FIREBASE_CONFIG){showToast('Set FIREBASE_CONFIG first — see Settings.','!');return;}
     try{
       const fbApp=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
-      const{getAuth,GoogleAuthProvider,signInWithPopup}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
+      const{getAuth,GoogleAuthProvider,signInWithPopup,signInWithRedirect}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
       const app=fbApp.getApps().length?fbApp.getApp():fbApp.initializeApp(window.FIREBASE_CONFIG);
       const auth=getAuth(app);
       const provider=new GoogleAuthProvider();
-      const result=await signInWithPopup(auth,provider);
-      const user=result.user;
-      S.googleUser={name:user.displayName,email:user.email,photo:user.photoURL};
-      // Auto-fill name if registering
-      if(S.loginMode==='register'&&!S.loginName){S.loginName=user.displayName?.split(' ')[0]||'';}
-      // If account exists with same email, auto-login
-      const d=loadLocal();
-      if(d){
-        localStorage.setItem(AUTH_KEY,'1');
-        S.data=d;S.view='dashboard';render();startLiveTick();
-        showToast('Signed in with Google.','✓');
-      } else {
-        // Continue registration
-        showToast('Google account linked. Complete setup below.','✓');
-        render();
+      try{
+        const result=await signInWithPopup(auth,provider);
+        window._meridianHandleAuthResult(result);
+      }catch(popupErr){
+        if(popupErr.code==='auth/popup-blocked'||popupErr.code==='auth/cancelled-popup-request'||popupErr.message?.includes('Cross-Origin-Opener-Policy')){
+          await signInWithRedirect(auth,provider);
+        }else throw popupErr;
       }
     }catch(e){
       showToast(e.code==='auth/popup-closed-by-user'?'Sign-in cancelled.':'Google sign-in failed: '+e.message,'!');
@@ -2363,22 +2378,17 @@ const A={
     if(!window.FIREBASE_CONFIG){showToast('Set FIREBASE_CONFIG first — see Settings.','!');return;}
     try{
       const fbApp=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
-      const{getAuth,GithubAuthProvider,signInWithPopup}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
+      const{getAuth,GithubAuthProvider,signInWithPopup,signInWithRedirect}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
       const app=fbApp.getApps().length?fbApp.getApp():fbApp.initializeApp(window.FIREBASE_CONFIG);
       const auth=getAuth(app);
       const provider=new GithubAuthProvider();
-      const result=await signInWithPopup(auth,provider);
-      const user=result.user;
-      S.googleUser={name:user.displayName,email:user.email,photo:user.photoURL};
-      if(S.loginMode==='register'&&!S.loginName){S.loginName=user.displayName?.split(' ')[0]||user.email?.split('@')[0]||'';}
-      const d=loadLocal();
-      if(d){
-        localStorage.setItem(AUTH_KEY,'1');
-        S.data=d;S.view='dashboard';render();startLiveTick();
-        showToast('Signed in with GitHub.','✓');
-      } else {
-        showToast('GitHub account linked. Complete setup below.','✓');
-        render();
+      try{
+        const result=await signInWithPopup(auth,provider);
+        window._meridianHandleAuthResult(result,'GitHub');
+      }catch(popupErr){
+        if(popupErr.code==='auth/popup-blocked'||popupErr.code==='auth/cancelled-popup-request'||popupErr.message?.includes('Cross-Origin-Opener-Policy')){
+          await signInWithRedirect(auth,provider);
+        }else throw popupErr;
       }
     }catch(e){
       showToast(e.code==='auth/popup-closed-by-user'?'Sign-in cancelled.':'GitHub sign-in failed: '+e.message,'!');
@@ -2631,6 +2641,11 @@ function attach(){
       } else if(prev){prev.style.display='none';}
     }
     if(e.target.id==='test-name')S.testName=e.target.value;
+    // Papers filter dropdowns
+    if(e.target.id==='pf-subject'){S.papersSubFilter=e.target.value;render();setTimeout(renderPaperThumbs,200);return;}
+    if(e.target.id==='pf-year'){S.papersYrFilter=e.target.value;render();setTimeout(renderPaperThumbs,200);return;}
+    if(e.target.id==='pf-type'){S.papersTypeFilter=e.target.value;render();setTimeout(renderPaperThumbs,200);return;}
+    if(e.target.id==='pf-source'){S.papersSrcFilter=e.target.value;render();setTimeout(renderPaperThumbs,200);return;}
     // Papers search — debounced
     if(e.target.id==='papers-search-inp'){
       S.papersSearch=e.target.value;
@@ -2667,10 +2682,30 @@ function attach(){
   icsInput.addEventListener('change',e=>{const f=e.target.files?.[0];if(f)handleICSFile(f);icsInput.value='';});
 }
 
+// Shared auth result handler (used by popup and redirect flows)
+window._meridianHandleAuthResult=function(result,provider='Google'){
+  const user=result.user;
+  S.googleUser={name:user.displayName,email:user.email,photo:user.photoURL};
+  if(S.loginMode==='register'&&!S.loginName){S.loginName=user.displayName?.split(' ')[0]||user.email?.split('@')[0]||'';}
+  const d=loadLocal();
+  if(d){
+    localStorage.setItem(AUTH_KEY,'1');
+    S.data=d;S.view='dashboard';render();startLiveTick();
+    showToast('Signed in with '+provider+'.','✓');
+  } else {
+    // No local account — switch to register flow with name pre-filled
+    S.loginMode='register';
+    S.loginName=user.displayName?.split(' ')[0]||user.email?.split('@')[0]||'';
+    S.regStep=2; // skip name step since we got it from Google
+    showToast('Signed in with '+provider+'. Finish setup below.','✓');
+    render();
+  }
+};
+
 /* ════════════════════════════════
    INIT
 ════════════════════════════════ */
-(function init(){
+(async function init(){
   const d=loadLocal();
   const authed=localStorage.getItem(AUTH_KEY);
   if(d){
@@ -2684,6 +2719,16 @@ function attach(){
   }
   render();attach();
   if(S.data)startLiveTick();
+  // Check for redirect sign-in result
+  if(window.FIREBASE_CONFIG){
+    try{
+      const fbApp=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+      const{getAuth,getRedirectResult}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
+      const app=fbApp.getApps().length?fbApp.getApp():fbApp.initializeApp(window.FIREBASE_CONFIG);
+      const result=await getRedirectResult(getAuth(app));
+      if(result&&result.user) window._meridianHandleAuthResult(result);
+    }catch(e){/* no redirect result */}
+  }
   // Auto-pull if on fresh device with no local data
   if(!d){
     const sc=loadSync();
