@@ -147,8 +147,8 @@ function saveLocal(d){try{localStorage.setItem(KEY,JSON.stringify(d));}catch{}}
 function loadSync(){try{const r=localStorage.getItem(SKEY);return r?JSON.parse(r):{apiKey:'',binId:'',lastSynced:null,status:'idle'};}catch{return{apiKey:'',binId:'',lastSynced:null,status:'idle'};}}
 function saveSync(s){try{localStorage.setItem(SKEY,JSON.stringify(s));}catch{}}
 function newAccount(name,pin,year,subs){return{name:name.trim(),pin,joined:today(),year,subjects:subs||ALL_PRESET_SUBS.slice(0,7),sessions:[],tests:[],timetable:[],graceUsed:null};}
-function exportCode(d){const s={n:d.name,p:d.pin,j:d.joined,y:d.year,subs:d.subjects,s:d.sessions,tests:d.tests||[],tt:d.timetable||[],g:d.graceUsed};return btoa(unescape(encodeURIComponent(JSON.stringify(s))));}
-function importCode(code){try{const s=JSON.parse(decodeURIComponent(escape(atob(code.trim()))));return{name:s.n,pin:s.p,joined:s.j||today(),year:s.y||11,subjects:s.subs||DEFAULT_SUBS,sessions:s.s||[],tests:s.tests||[],timetable:s.tt||[],graceUsed:s.g||null};}catch{return null;}}
+function exportCode(d){const s={n:d.name,p:d.pin,j:d.joined,y:d.year,subs:d.subjects,s:d.sessions,tests:d.tests||[],tt:d.timetable||[],g:d.graceUsed};const bytes=new TextEncoder().encode(JSON.stringify(s));let bin='';for(const b of bytes)bin+=String.fromCharCode(b);return btoa(bin);}
+function importCode(code){try{const bin=atob(code.trim());const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);const s=JSON.parse(new TextDecoder().decode(bytes));return{name:s.n,pin:s.p,joined:s.j||today(),year:s.y||11,subjects:s.subs||DEFAULT_SUBS,sessions:s.s||[],tests:s.tests||[],timetable:s.tt||[],graceUsed:s.g||null};}catch{return null;}}
 
 /* ════════════════════════════════
    COMPUTED
@@ -596,16 +596,37 @@ function updateSyncDot(){const d=document.querySelector('.sync-dot');if(!d)retur
    TIMER STATE
 ════════════════════════════════ */
 let timerInt=null,timerStart=0,timerElap=0,timerRunning=false,timerTarget=25*60;
-function startTimer(){timerStart=Date.now()-timerElap*1000;timerRunning=true;clearInterval(timerInt);timerInt=setInterval(()=>{timerElap=Math.floor((Date.now()-timerStart)/1000);if(timerElap>=timerTarget){timerElap=timerTarget;clearInterval(timerInt);timerRunning=false;renderTimerFast();showToast('Timer done — log your session','⏱');}else renderTimerFast();},500);}
+let breakInt=null,breakElap=0,breakTarget=5*60;
+function startTimer(){timerStart=Date.now()-timerElap*1000;timerRunning=true;clearInterval(timerInt);timerInt=setInterval(()=>{timerElap=Math.floor((Date.now()-timerStart)/1000);if(timerElap>=timerTarget){timerElap=timerTarget;clearInterval(timerInt);timerRunning=false;S.pomodoroCount++;S.pomodoroBreak=true;breakElap=0;breakTarget=S.pomodoroCount%4===0?20*60:5*60;startBreak();renderTimerFast();showToast('Timer done — take a break, then log your session','⏱');}else renderTimerFast();},500);}
+function startBreak(){clearInterval(breakInt);breakInt=setInterval(()=>{breakElap++;if(breakElap>=breakTarget){clearInterval(breakInt);S.pomodoroBreak=false;showToast('Break over — log your session or start another round','🔔');if(S.view==='timer')render();}else if(S.view==='timer')renderBreakFast();},1000);}
+function renderBreakFast(){const rem=Math.max(0,breakTarget-breakElap),m=Math.floor(rem/60),s=rem%60;const el=document.getElementById('break-timer');if(el)el.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;}
+function skipBreak(){clearInterval(breakInt);S.pomodoroBreak=false;render();}
 function pauseTimer(){clearInterval(timerInt);timerRunning=false;timerElap=Math.floor((Date.now()-timerStart)/1000);}
 function resetTimer(){clearInterval(timerInt);timerRunning=false;timerElap=0;renderTimerFast();}
-function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const t=document.getElementById('tt-time');if(t){t.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const b=document.getElementById('tt-bar');if(b)b.style.width=`${Math.min(100,(timerElap/timerTarget)*100)}%`;const l=document.getElementById('tt-lbl');if(l)l.textContent=timerRunning?'Running…':timerElap>0?'Paused':'Ready';const ring=document.getElementById('tt-ring');if(ring){const R=72,CIRC=2*Math.PI*R,pct=Math.min(100,(timerElap/timerTarget)*100);ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=timerRunning?'var(--acc)':'var(--bdS)';}}
+function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const t=document.getElementById('tt-time');if(t){t.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const b=document.getElementById('tt-bar');if(b)b.style.width=`${Math.min(100,(timerElap/timerTarget)*100)}%`;const l=document.getElementById('tt-lbl');if(l)l.textContent=timerRunning?'Running…':timerElap>0?'Paused':'Ready';const ring=document.getElementById('tt-ring');if(ring){const R=80,CIRC=2*Math.PI*R,pct=Math.min(100,(timerElap/timerTarget)*100);ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=timerRunning?'var(--acc)':'var(--bdS)';ring.style.filter=timerRunning?'drop-shadow(0 0 6px rgba(192,90,48,.3))':'none';}}
 
 /* ════════════════════════════════
    LIVE UPDATE TICKER
 ════════════════════════════════ */
 let liveTickInt=null;
-function startLiveTick(){clearInterval(liveTickInt);liveTickInt=setInterval(()=>{if(S.data&&(S.view==='dashboard'||S.view==='timetable')){renderLiveElements();}},5000);}
+function startLiveTick(){clearInterval(liveTickInt);liveTickInt=setInterval(()=>{if(S.data&&(S.view==='dashboard'||S.view==='timetable')){renderLiveElements();}checkStreakReminder();},5000);}
+
+// ── Browser notifications ──
+function requestNotifPermission(){if('Notification' in window&&Notification.permission==='default'){Notification.requestPermission();}}
+let _lastStreakNotif='';
+function checkStreakReminder(){
+  if(!S.data||!('Notification' in window)||Notification.permission!=='granted')return;
+  const h=new Date().getHours();
+  if(h<21||h>=23)return; // Only 9-11pm
+  const tKey='mer_notif_'+today();
+  if(localStorage.getItem(tKey))return;
+  const tSess=S.data.sessions.filter(s=>s.date===today()&&s.subject!=='grace');
+  if(tSess.length>0)return; // Already studied today
+  const streak=getStreak(S.data.sessions);
+  if(streak<1)return;
+  localStorage.setItem(tKey,'1');
+  new Notification('Meridian — streak at risk',{body:`Your ${streak}-day streak ends at midnight. Even 10 minutes saves it.`,icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="%2328221A"/><text x="16" y="22" text-anchor="middle" font-size="18">🔥</text></svg>'});
+}
 function renderLiveElements(){
   // Update Now/Next card
   const nn=document.getElementById('nownext');
@@ -672,6 +693,7 @@ let S={
   showExport:false,
   showPinEntry:false,
   testSub:null,testScore:'',testOutOf:100,testName:'',testType:'Test',testDate:today(),testNextDate:'',testNextName:'',editTestId:null,
+  editSessId:null,logDate:'',
   regStep:1,regPin1:'',regPin2:'',regYear:11,
   regSubjects:['chem','bio','phys','max','mae','eng'],
   tutStep:0,showOnboardComplete:false,
@@ -693,6 +715,9 @@ let S={
   lbLoading:false,
   lbRival:null,              // selected rival userId for h2h
   lbH2hMode:'weekMins',     // h2h comparison mode
+  darkMode:localStorage.getItem('mer_dark')==='1',
+  pomodoroBreak:false,       // true when in break phase
+  pomodoroCount:0,           // completed pomodoros this session
 };
 
 /* ════════════════════════════════
@@ -1015,20 +1040,21 @@ function renderShell(){
   </div>
   <nav class="bnav mob">
     <div class="bni${S.view==='dashboard'?' on':''}" data-action="nav-dashboard"><span class="bni-ic">◉</span>Home<div class="bni-dot"></div></div>
-    <div class="bni${S.view==='timetable'?' on':''}" data-action="nav-timetable"><span class="bni-ic">☰</span>Schedule<div class="bni-dot"></div></div>
+    <div class="bni${S.view==='timer'?' on':''}" data-action="nav-timer"><span class="bni-ic">◷</span>Timer<div class="bni-dot"></div></div>
     <div class="fab-wrap">
       <div class="fab" data-action="open-log">＋</div>
     </div>
-    <div class="bni${S.view==='papers'?' on':''}" data-action="nav-papers"><span class="bni-ic">◧</span>Papers<div class="bni-dot"></div></div>
-    <div class="bni${['progress','history','stats','timer','settings','leaderboard'].includes(S.view)?' on':''}" data-action="toggle-more"><span class="bni-ic">⋯</span>More<div class="bni-dot"></div></div>
+    <div class="bni${S.view==='progress'?' on':''}" data-action="nav-progress"><span class="bni-ic">△</span>Progress<div class="bni-dot"></div></div>
+    <div class="bni${['timetable','papers','history','stats','settings','leaderboard'].includes(S.view)?' on':''}" data-action="toggle-more"><span class="bni-ic">⋯</span>More<div class="bni-dot"></div></div>
   </nav>
   ${S.moreMenu?`<div class="more-menu-overlay" data-action="close-more"></div>
-  <div class="more-menu">
+  <div class="more-menu" id="more-sheet">
+    <div class="more-menu-handle" data-action="close-more"></div>
+    <div class="more-item${S.view==='timetable'?' on':''}" data-action="more-nav" data-view="timetable"><span class="more-item-ic">☰</span>Schedule</div>
     <div class="more-item${S.view==='leaderboard'?' on':''}" data-action="more-nav" data-view="leaderboard"><span class="more-item-ic">🏆</span>Leaderboard</div>
-    <div class="more-item${S.view==='progress'?' on':''}" data-action="more-nav" data-view="progress"><span class="more-item-ic">△</span>Progress</div>
+    <div class="more-item${S.view==='papers'?' on':''}" data-action="more-nav" data-view="papers"><span class="more-item-ic">◧</span>Papers</div>
     <div class="more-item${S.view==='history'?' on':''}" data-action="more-nav" data-view="history"><span class="more-item-ic">◔</span>History</div>
     <div class="more-item${S.view==='stats'?' on':''}" data-action="more-nav" data-view="stats"><span class="more-item-ic">◇</span>Stats</div>
-    <div class="more-item${S.view==='timer'?' on':''}" data-action="more-nav" data-view="timer"><span class="more-item-ic">◷</span>Timer</div>
     <div class="more-item${S.view==='settings'?' on':''}" data-action="more-nav" data-view="settings"><span class="more-item-ic">⚙</span>Settings</div>
   </div>`:''}
   ${S.modal?renderModal():''}
@@ -1238,7 +1264,7 @@ function renderDash(){
       <div class="ov-val">${totalMins(sessions)?fmtDur(totalMins(sessions)):'0m'}</div>
       <div class="ov-sub">${tSess} session${tSess!==1?'s':''}</div>
     </div>
-    <div class="ov-tile${dLeft<=30?' accent':''}">
+    <div class="ov-tile${dLeft<=14?' urg-red':dLeft<=30?' urg-amber':dLeft<=60?' accent':''}">
       <div class="ov-lbl">${exam.name}</div>
       <div class="ov-val">${Math.max(0,dLeft)}</div>
       <div class="ov-sub">days left</div>
@@ -1273,6 +1299,37 @@ function renderDash(){
     </div>
     <div class="cov-track"><div class="cov-fill${done.length===subjects.length?' done':''}" data-bw="${cvPct}" style="width:0%"></div></div>
   </div>
+
+  ${(()=>{
+    const tests=S.data.tests||[];
+    const upcoming=tests.filter(t=>t.nextTestDate&&t.nextTestDate>today()).sort((a,b)=>a.nextTestDate.localeCompare(b.nextTestDate)).slice(0,3);
+    if(!upcoming.length)return'';
+    return`<div class="dash-upcoming mb12">
+      <div class="sec mb6"><span class="sec-lbl">Upcoming tests</span><span class="sec-link" data-action="prog-tab" data-tab="1">Scores →</span></div>
+      ${upcoming.map(t=>{
+        const d=daysUntil(t.nextTestDate);
+        const sub=subjects.find(s=>s.id===t.subject);
+        const c=sub?getSubjColor(sub):{bg:'var(--srf2)',tx:'var(--tx3)',bd:'var(--bd)'};
+        const urgCls=d<=7?'urg-red':d<=14?'urg-amber':'';
+        return`<div class="upcoming-test-row ${urgCls}">
+          <div class="upt-days">${d}<span>d</span></div>
+          <div class="upt-info">
+            <div class="upt-name">${t.nextTestName||sub?.name||'Test'}</div>
+            <div class="upt-sub">${sub?.name||''} · ${fmtShort(t.nextTestDate)}</div>
+          </div>
+          <div class="upt-action" data-action="quick-log" data-subject="${t.subject}">Study</div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  })()}
+
+  ${(()=>{
+    const hCells=[];for(let i=55;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=localDate(d);hCells.push({date:ds,mins:dayMins(sessions,ds),isT:ds===today()});}
+    return`<div class="dash-heatmap" data-action="nav-history">
+      <div class="sec mb6"><span class="sec-lbl">8-week activity</span><span class="sec-link">History →</span></div>
+      <div class="dash-hmap-grid">${hCells.map(c=>{let cl='h0';if(c.mins>=10&&c.mins<30)cl='h1';else if(c.mins>=30&&c.mins<60)cl='h2';else if(c.mins>=60&&c.mins<120)cl='h3';else if(c.mins>=120)cl='h4';return`<div class="dhc ${cl}${c.isT?' htoday':''}" title="${fmtShort(c.date)}: ${c.mins>0?fmtDur(c.mins):'—'}"></div>`;}).join('')}</div>
+    </div>`;
+  })()}
 
   <div class="sec"><span class="sec-lbl">Subjects</span><span class="sec-link" data-action="open-log">+ Log</span></div>
   <div class="sub-grid mb16">
@@ -2019,8 +2076,16 @@ const THSC_SUBJECTS = [
   {code:'1370', label:'Biology', unit:'Yr 11/12', color:1},
   {code:'6520', label:'Physics', unit:'Yr 11/12', color:2},
   {code:'1480', label:'Chemistry', unit:'Yr 11/12', color:0},
-  {code:'2650', label:'Engineering Studies', unit:'Yr 11/12', color:6},
+  {code:'2670', label:'Engineering Studies', unit:'Yr 11/12', color:6},
   {code:'2250', label:'English Advanced', unit:'Yr 11/12', color:5},
+  // Additional subjects from thsconline numbered JSONs
+  {code:'1170', label:'Ancient History', unit:'Yr 11/12', color:7},
+  {code:'1570', label:'Business Studies', unit:'Yr 11/12', color:6},
+  {code:'2470', label:'Economics', unit:'Yr 11/12', color:2},
+  {code:'5520', label:'Modern History', unit:'Yr 11/12', color:7},
+  {code:'5020', label:'Legal Studies', unit:'Yr 11/12', color:3},
+  {code:'2420', label:'Earth & Env Science', unit:'Yr 11/12', color:1},
+  {code:'5310', label:'General Maths', unit:'Yr 11/12', color:4},
 ];
 
 // Bored of Studies resource category IDs per subject
@@ -2033,6 +2098,15 @@ const BOS_CATEGORIES = {
   'Chemistry':{slug:'chemistry',id:503},
   'Engineering Studies':{slug:'engineering-studies',id:540},
   'English Advanced':{slug:'english-advanced',id:462},
+  'Ancient History':{slug:'ancient-history',id:510},
+  'Modern History':{slug:'modern-history',id:516},
+  'Business Studies':{slug:'business-studies',id:522},
+  'Economics':{slug:'economics',id:525},
+  'Legal Studies':{slug:'legal-studies',id:528},
+  'PDHPE':{slug:'pdhpe',id:532},
+  'Geography':{slug:'geography',id:535},
+  'General Maths':{slug:'mathematics-standard',id:480},
+  'Earth & Env Science':{slug:'earth-and-environmental-science',id:537},
 };
 
 function getBosEntries(){
@@ -2109,7 +2183,25 @@ const HSC_COURSE_MAP = {
   'Mathematics Extension 1':'Maths Ext 1',
   'Mathematics Extension 2':'Maths Ext 2',
   'English Advanced':'English Advanced',
-  'Engineering Studies':'Engineering',
+  'English Standard':'English Standard',
+  'Engineering Studies':'Engineering Studies',
+  'Ancient History':'Ancient History',
+  'Modern History':'Modern History',
+  'Business Studies':'Business Studies',
+  'Economics':'Economics',
+  'Legal Studies':'Legal Studies',
+  'Geography':'Geography',
+  'PDHPE':'PDHPE',
+  'Software Design and Development':'Software Design',
+  'Information Processes and Technology':'IPT',
+  'Earth and Environmental Science':'Earth & Env Science',
+  'General Mathematics':'General Maths',
+  'Society and Culture':'Society & Culture',
+  'Studies of Religion I':'Studies of Religion',
+  'Studies of Religion II':'Studies of Religion',
+  'Visual Arts':'Visual Arts',
+  'Agriculture':'Agriculture',
+  'Senior Science':'Senior Science',
 };
 
 let papersCache = null; // {local, thsc, hsc}
@@ -2387,10 +2479,11 @@ function renderPapers(){
 }
 
 // Render PDF thumbnails via PDF.js after the view is painted
-function renderPaperThumbs(){
+async function renderPaperThumbs(){
   if(!window.pdfjsReady || !window.pdfjsLib) return;
-  document.querySelectorAll('canvas[data-pdf-url]').forEach(async canvas=>{
-    if(canvas.dataset.rendered) return;
+  const canvases = document.querySelectorAll('canvas[data-pdf-url]');
+  for(const canvas of canvases){
+    if(canvas.dataset.rendered) continue;
     canvas.dataset.rendered = '1';
     try {
       const url = canvas.dataset.pdfUrl;
@@ -2410,7 +2503,7 @@ function renderPaperThumbs(){
       const par = canvas.parentElement;
       if(par) par.innerHTML = `<div class="paper-thumb-placeholder"><div class="ptp-icon" style="opacity:.3;font-size:28px;">📄</div><div class="ptp-type" style="margin-top:8px;">Preview unavailable</div></div>`;
     }
-  });
+  }
 }
 
 function renderPdfViewer(){
@@ -2436,18 +2529,41 @@ function renderPdfViewer(){
    TIMER VIEW
 ════════════════════════════════ */
 function renderTimer(){
+  if(S.pomodoroBreak){
+    const brem=Math.max(0,breakTarget-breakElap),bm=Math.floor(brem/60),bs=brem%60;
+    const isLong=S.pomodoroCount%4===0;
+    const bPct=Math.min(100,(breakElap/breakTarget)*100);
+    return`
+    <div class="pg-title">Timer</div>
+    <div class="card" style="padding:24px 20px;">
+      <div class="pomo-break">
+        <div class="pomo-break-icon">${isLong?'🧘':'☕'}</div>
+        <div class="pomo-break-title">${isLong?'Long break — you earned it':'Take a break'}</div>
+        <div class="pomo-break-sub">${isLong?'Stand up, stretch, grab water. Your brain consolidates learning during rest.':'Step away from the screen. Look at something 20 feet away for 20 seconds.'}</div>
+        <div class="pomo-break-timer" id="break-timer">${String(bm).padStart(2,'0')}:${String(bs).padStart(2,'0')}</div>
+        <div style="height:3px;background:var(--srf2);border-radius:2px;margin:0 40px 16px;overflow:hidden;"><div style="height:100%;width:${bPct}%;background:var(--ok);border-radius:2px;transition:width .5s linear;"></div></div>
+        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);margin-bottom:20px;">${S.pomodoroCount} pomodoro${S.pomodoroCount!==1?'s':''} done</div>
+        <div class="tbtns">
+          <button class="tbtn tbtn-p" style="background:var(--ok);border-color:var(--ok);" data-action="open-log">Log session →</button>
+          <button class="tbtn tbtn-s" data-action="skip-break">Skip break</button>
+        </div>
+      </div>
+    </div>`;
+  }
   const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;
   const pct=Math.min(100,(timerElap/timerTarget)*100);
-  const R=72,CIRC=2*Math.PI*R;
+  const R=80,CIRC=2*Math.PI*R;
   const offset=CIRC-(pct/100)*CIRC;
+  const elapMin=Math.floor(timerElap/60);
   return`
   <div class="pg-title">Timer</div>
-  <div class="card" style="padding:0 20px 24px;">
+  <div class="card timer-card">
     <div class="timer-face">
-      <div class="timer-ring-wrap">
-        <svg class="timer-ring-svg" width="180" height="180" viewBox="0 0 180 180">
-          <circle cx="90" cy="90" r="${R}" fill="none" stroke="var(--srf2)" stroke-width="6"/>
-          <circle id="tt-ring" cx="90" cy="90" r="${R}" fill="none" stroke="${timerRunning?'var(--acc)':'var(--bdS)'}" stroke-width="6" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;"/>
+      <div class="timer-ring-wrap" style="width:200px;height:200px;">
+        <svg class="timer-ring-svg" width="200" height="200" viewBox="0 0 200 200">
+          <circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--srf2)" stroke-width="5"/>
+          ${timerRunning||timerElap>0?`<circle cx="100" cy="100" r="${R}" fill="none" stroke="${timerRunning?'var(--acc)':'var(--bdS)'}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;filter:${timerRunning?'drop-shadow(0 0 6px rgba(192,90,48,.3))':'none'};"/>`
+          :`<circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--bdS)" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${CIRC}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;"/>`}
         </svg>
         <div class="timer-ring-center">
           <div class="timer-num${timerRunning?' run':''}" id="tt-time">${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}</div>
@@ -2455,20 +2571,25 @@ function renderTimer(){
         </div>
       </div>
     </div>
-    <div class="tbtns">
+    ${timerElap>0?`<div class="timer-elapsed-bar">
+      <span>${elapMin}m elapsed</span>
+      <span>${Math.round(pct)}%</span>
+    </div>`:''}
+    <div class="tbtns" style="margin-top:${timerElap>0?'12px':'20px'};">
       ${timerRunning
         ?`<button class="tbtn tbtn-s" data-action="timer-pause">Pause</button>`
         :`<button class="tbtn tbtn-p" data-action="timer-start">${timerElap>0?'Resume':'Start'}</button>`}
       <button class="tbtn tbtn-s" data-action="timer-reset">Reset</button>
-      ${timerElap>0&&!timerRunning?`<button class="tbtn tbtn-p" style="background:var(--ok);border-color:var(--ok);" data-action="open-log">Log it →</button>`:''}
     </div>
+    ${timerElap>0&&!timerRunning?`<button class="tbtn tbtn-p timer-log-btn" data-action="open-log">Log ${fmtDur(Math.ceil(timerElap/60))} session →</button>`:''}
     <div class="row-divider"></div>
     <div class="sec mb8"><span class="sec-lbl">Presets</span></div>
     <div class="dur-grid">${[15,20,25,30,45,60,90].map(t=>`<div class="dur-pill${timerTarget===t*60&&!timerRunning?' on':''}" data-action="set-timer" data-dur="${t}">${t}m</div>`).join('')}</div>
   </div>
-  <div class="card" style="padding:14px 17px;margin-top:10px;border-left:3px solid var(--acc);">
-    <div style="font-size:13px;color:var(--tx2);font-weight:300;line-height:1.65;"><strong style="font-weight:500;color:var(--tx);">How to use:</strong> Set a preset → start → study without distraction → tap <strong style="font-weight:500;color:var(--ok);">Log it</strong> when done. Your duration auto-fills.</div>
-  </div>`;
+  ${!timerRunning&&timerElap===0?`<div class="card timer-tip">
+    <div class="timer-tip-icon">◷</div>
+    <div><strong>Set a preset</strong> → start → study without distraction → tap <strong style="color:var(--ok);">Log it</strong> when done.</div>
+  </div>`:''}`;
 }
 
 /* ════════════════════════════════
@@ -2485,9 +2606,13 @@ function renderSettings(){
     <div class="srow"><span class="srow-l">Name</span><input type="text" id="sname" class="srow-v" value="${esc(name)}" maxlength="30" style="text-align:right;border:none;background:transparent;outline:none;font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);"></div>
     <div class="srow"><span class="srow-l">Year</span><select id="syear" style="font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);border:none;background:transparent;outline:none;cursor:pointer;appearance:none;">${[7,8,9,10,11,12].map(y=>`<option value="${y}"${y===year?' selected':''}>Year ${y}</option>`).join('')}</select></div>
     <div class="srow"><span class="srow-l">Exam target</span><span class="srow-v">${getExamDate(year).name} · ${Math.max(0,daysUntil(getExamDate(year).date))}d</span></div>
-    <div class="srow"><span class="srow-l">Sessions logged</span><span class="srow-v">${sessions.filter(s=>s.subject!=='grace').length}</span></div>
-    <div class="srow"><span class="srow-l">Total study time</span><span class="srow-v">${fmtDur(totalMins(sessions))}</span></div>
-    <div class="srow"><span class="srow-l">Member since</span><span class="srow-v">${fmtShort(joined)}</span></div>
+    <div class="settings-stats-row">
+      <div class="settings-stat"><div class="settings-stat-v">${sessions.filter(s=>s.subject!=='grace').length}</div><div class="settings-stat-l">sessions</div></div>
+      <div class="settings-stat"><div class="settings-stat-v">${fmtDur(totalMins(sessions))}</div><div class="settings-stat-l">study time</div></div>
+      <div class="settings-stat"><div class="settings-stat-v">${fmtShort(joined)}</div><div class="settings-stat-l">joined</div></div>
+    </div>
+    <div class="srow"><span class="srow-l">Dark mode</span><div class="toggle${S.darkMode?' on':''}" data-action="toggle-dark"><div class="toggle-knob"></div></div></div>
+    <div class="srow"><span class="srow-l">Streak reminders</span><div class="toggle${'Notification' in window&&Notification.permission==='granted'?' on':''}" data-action="toggle-notif"><div class="toggle-knob"></div></div></div>
     <button class="m-submit" style="font-size:13.5px;padding:11px;" data-action="save-account">Save changes →</button>
   </div>
 
@@ -2550,7 +2675,14 @@ function renderSettings(){
 
   <div class="sset">
     <div class="sset-t">↓ Offline backup</div>
-    <button class="cpbtn" data-action="toggle-export">${S.showExport?'Hide':'Show export code'}</button>
+    <div style="display:flex;gap:8px;">
+      <button class="cpbtn" style="flex:1;" data-action="export-json">↓ Download backup</button>
+      <button class="cpbtn" style="flex:1;" data-action="import-json">↑ Restore backup</button>
+    </div>
+    <div style="display:flex;gap:8px;margin-top:6px;">
+      <button class="cpbtn" style="flex:1;" data-action="toggle-export">${S.showExport?'Hide':'Show'} export code</button>
+    </div>
+    <input type="file" id="json-import-input" accept=".json" style="display:none;">
     ${S.showExport?`<div style="margin-top:8px;"><div class="syncbox">${exportCode(S.data)}</div><button class="cpbtn" data-action="copy-export">Copy to clipboard</button></div>`:''}
   </div>
 
@@ -2764,7 +2896,11 @@ function renderSessRow(s){
       <div class="sess-m">${fmtDate(s.date)}${s.note?' · '+s.note:''}</div>
     </div>
     <div class="sess-right"><div class="sess-dur">${fmtDur(s.duration)}</div><div class="cdots">${dots}</div></div>
-    <div class="del-btn" data-action="del-sess" data-id="${s.id}">✕</div>
+    <div class="test-actions">
+      <div class="edit-btn" data-action="relog" data-id="${s.id}" title="Study again">↻</div>
+      <div class="edit-btn" data-action="edit-sess" data-id="${s.id}" title="Edit">✎</div>
+      <div class="del-btn" data-action="del-sess" data-id="${s.id}" title="Delete">✕</div>
+    </div>
   </div>`;
 }
 
@@ -2896,7 +3032,7 @@ function renderLogModal(){
         <div class="mhandle" data-action="close-modal"></div>
         <div class="modal-close-x" data-action="close-modal">✕</div>
         <div style="display:flex;align-items:baseline;justify-content:space-between;">
-          <div class="mtitle">Log a session</div>
+          <div class="mtitle">${S.editSessId?'Edit session':'Log a session'}</div>
           <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);letter-spacing:.08em;">${new Date().toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})}</div>
         </div>
         <div class="msub">${tElap?`⏱ Timer ran for <strong>${fmtDur(tElap)}</strong> — duration pre-filled.`:'Even 15 minutes. Just log it.'}</div>
@@ -2952,6 +3088,9 @@ function renderLogModal(){
           <span>min (exact)</span>
         </div>
 
+        <div class="mlbl">Date <span style="color:var(--tx3);font-size:11px;font-weight:300;">default today</span></div>
+        <input class="minp" id="log-date" type="date" value="${S.logDate||today()}" max="${today()}" style="margin-bottom:12px;">
+
         <div class="mlbl" style="margin-top:2px;">How did it go?</div>
         <div class="conf-grid">
           ${CE.map((e,i)=>`<div class="conf-btn${S.logConf===i+1?' on':''}" data-action="sel-conf" data-conf="${i+1}">
@@ -2966,7 +3105,7 @@ function renderLogModal(){
         </div>
 
         ${S.logErr?`<div class="merr">${S.logErr}</div>`:''}
-        <button class="log-submit${isReady?' ready':''}" data-action="submit-log">${isReady?`Log ${prevDur} of ${prevSubName}`:'Select a subject to log'}</button>
+        <button class="log-submit${isReady?' ready':''}" data-action="submit-log">${isReady?(S.editSessId?`Update ${prevSubName} session`:`Log ${prevDur} of ${prevSubName}`):'Select a subject to log'}</button>
       </div>
     </div>
   </div>`;
@@ -3002,10 +3141,42 @@ function renderAddSubjModal(){
 let toastTm=null;
 function showToast(msg,icon='✓'){
   const t=document.getElementById('toast');if(!t)return;
-  document.getElementById('ti').textContent=icon;document.getElementById('tt').textContent=msg;
-  t.classList.add('show');clearTimeout(toastTm);toastTm=setTimeout(()=>t.classList.remove('show'),2800);
+  document.getElementById('ti').textContent=icon;
+  const tt=document.getElementById('tt');
+  if(tt){tt.innerHTML=msg;}
+  t.classList.add('show');clearTimeout(toastTm);toastTm=setTimeout(()=>t.classList.remove('show'),4000);
+}
+let _undoAction=null;
+function showUndoToast(msg,undoFn){
+  _undoAction=undoFn;
+  showToast(`${msg} <span class="undo-link" id="undo-btn">Undo</span>`,'✕');
+  // Attach click to undo
+  setTimeout(()=>{
+    const ub=document.getElementById('undo-btn');
+    if(ub)ub.onclick=()=>{if(_undoAction){_undoAction();_undoAction=null;}document.getElementById('toast')?.classList.remove('show');};
+  },50);
 }
 function flashGreen(){const el=document.getElementById('flash');if(!el)return;el.classList.remove('go');requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add('go')));}
+
+/* ════════════════════════════════
+   SMOOTH CLOSE ANIMATIONS
+════════════════════════════════ */
+function closeModalSmooth(){
+  const overlay=document.querySelector('.overlay');
+  const modal=document.querySelector('.modal');
+  if(!overlay){S.modal=null;document.body.classList.remove('modal-open');render();return;}
+  if(modal){modal.style.transition='transform .22s cubic-bezier(.4,0,1,1)';modal.style.transform='translateY(100%)';}
+  overlay.classList.add('closing');
+  setTimeout(()=>{S.modal=null;document.body.classList.remove('modal-open');render();},220);
+}
+function closeMoreSmooth(){
+  const sheet=document.getElementById('more-sheet');
+  const overlay=document.querySelector('.more-menu-overlay');
+  if(!sheet){S.moreMenu=false;render();return;}
+  sheet.classList.add('closing');
+  if(overlay)overlay.classList.add('closing');
+  setTimeout(()=>{S.moreMenu=false;render();},220);
+}
 
 /* ════════════════════════════════
    ACTIONS
@@ -3121,6 +3292,7 @@ const A={
   'nav-timetable':()=>{S.view='timetable';S.modal=null;S.moreMenu=false;render();},
   'nav-history':()=>{S.view='history';S.modal=null;render();},
   'nav-stats':()=>{S.view='stats';S.modal=null;render();},
+  'skip-break':()=>{skipBreak();},
   'nav-timer':()=>{S.view='timer';S.modal=null;render();},
   'nav-settings':()=>{S.view='settings';S.modal=null;render();},
   'nav-leaderboard':()=>{
@@ -3154,14 +3326,24 @@ const A={
   'tt-tab':(btn)=>{S.ttTab=parseInt(btn.dataset.tab);render();},
 
   'open-log':()=>{
-    S.modal='log';S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;S._noteOpen=false;
+    S.modal='log';S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;S._noteOpen=false;S.logDate='';S.editSessId=null;
     S.logDur=timerElap>0&&!timerRunning?Math.max(5,Math.ceil(timerElap/60)):45;
     S.logSub=S.data.timetable?getSmartSubject(S.data.timetable,S.data.subjects):null;
     document.body.classList.add('modal-open');render();
   },
-  'quick-log':(btn)=>{S.modal='log';S.logSub=btn.dataset.subject;S.logDur=45;S.logConf=3;S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;S._noteOpen=false;document.body.classList.add('modal-open');render();},
-  'close-modal':()=>{S.modal=null;document.body.classList.remove('modal-open');render();},
-  'close-modal-out':(btn,e)=>{if(e.target.classList.contains('overlay')){S.modal=null;document.body.classList.remove('modal-open');render();}},
+  'quick-log':(btn)=>{S.modal='log';S.logSub=btn.dataset.subject;S.logDur=45;S.logConf=3;S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;S._noteOpen=false;S.logDate='';S.editSessId=null;document.body.classList.add('modal-open');render();},
+  'relog':(btn)=>{
+    const s=(S.data.sessions||[]).find(x=>x.id===btn.dataset.id);if(!s)return;
+    S.modal='log';S.logSub=s.subject;S.logDur=s.duration;S.logConf=s.confidence||3;S.logTopic=s.topic||null;S.logNote='';S.logErr='';S.logCustom='';S._noteOpen=false;S.logDate='';S.editSessId=null;
+    document.body.classList.add('modal-open');render();
+  },
+  'edit-sess':(btn)=>{
+    const s=(S.data.sessions||[]).find(x=>x.id===btn.dataset.id);if(!s)return;
+    S.modal='log';S.editSessId=s.id;S.logSub=s.subject;S.logDur=s.duration;S.logConf=s.confidence||3;S.logTopic=s.topic||null;S.logNote=s.note||'';S.logErr='';S.logCustom='';S._noteOpen=!!s.note;S.logDate=s.date||'';
+    document.body.classList.add('modal-open');render();
+  },
+  'close-modal':()=>{closeModalSmooth();},
+  'close-modal-out':(btn,e)=>{if(e.target.classList.contains('overlay'))closeModalSmooth();},
 
   'sel-sub':(btn)=>{
     S.logSub=btn.dataset.sub;S.logTopic=null;
@@ -3219,9 +3401,21 @@ const A={
     const note=document.getElementById('log-note')?.value?.trim()||'';
     const cust=document.getElementById('cust-dur')?.value;
     const dur=cust&&parseInt(cust)>0?parseInt(cust):S.logDur;
-    const sess={id:uid(),date:today(),subject:S.logSub,duration:dur,confidence:S.logConf,note,topic:S.logTopic||null,ts:Date.now()};
+    const logDate=document.getElementById('log-date')?.value||today();
+    if(S.editSessId){
+      // Update existing session
+      const idx=S.data.sessions.findIndex(x=>x.id===S.editSessId);
+      if(idx>=0){
+        S.data.sessions[idx]={...S.data.sessions[idx],subject:S.logSub,duration:dur,confidence:S.logConf,note,topic:S.logTopic||null,date:logDate};
+      }
+      saveLocal(S.data);triggerSync();triggerLbPush();
+      S.modal=null;S.logTopic=null;S.editSessId=null;document.body.classList.remove('modal-open');
+      render();showToast('Session updated.','✓');
+      return;
+    }
+    const sess={id:uid(),date:logDate,subject:S.logSub,duration:dur,confidence:S.logConf,note,topic:S.logTopic||null,ts:Date.now()};
     S.data.sessions.push(sess);saveLocal(S.data);triggerSync();triggerLbPush();
-    S.modal=null;S.logTopic=null;document.body.classList.remove('modal-open');
+    S.modal=null;S.logTopic=null;S.editSessId=null;document.body.classList.remove('modal-open');
     const sub=S.data.subjects.find(x=>x.id===S.logSub);
     const topicStr=sess.topic?` · ${sess.topic}`:'';
     const msgs=[
@@ -3252,8 +3446,11 @@ const A={
   },
   'show-pin-entry':()=>{S.showPinEntry=true;S.loginMode='login';render();setTimeout(()=>document.getElementById('li-pin')?.focus(),60);},
 
-  'toggle-more':()=>{S.moreMenu=!S.moreMenu;render();},
-  'close-more':()=>{S.moreMenu=false;render();},
+  'toggle-more':()=>{
+    if(S.moreMenu){closeMoreSmooth();}
+    else{S.moreMenu=true;render();}
+  },
+  'close-more':()=>{closeMoreSmooth();},
   'more-nav':(btn)=>{const v=btn.dataset.view;S.view=v;S.moreMenu=false;S.modal=null;render();if(v==='papers'&&!S.papersData&&!S.papersLoading){S.papersLoading=true;loadPapersData().then(d=>{S.papersData=d;S.papersLoading=false;if(S.view==='papers')render();});}if(v==='leaderboard'&&!S.lbData&&!S.lbLoading){S.lbLoading=true;render();lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;if(S.view==='leaderboard')render();});}},
   'nav-progress':()=>{S.view='progress';S.modal=null;S.moreMenu=false;render();},
   'prog-tab':(btn)=>{S.progTab=parseInt(btn.dataset.tab);render();},
@@ -3391,9 +3588,10 @@ const A={
   },
 
   'del-test':(btn)=>{
-    if(!confirm('Delete this test score?'))return;
+    const removed=(S.data.tests||[]).find(t=>t.id===btn.dataset.id);if(!removed)return;
     S.data.tests=(S.data.tests||[]).filter(t=>t.id!==btn.dataset.id);
-    saveLocal(S.data);triggerSync();render();showToast('Score removed.','✕');
+    saveLocal(S.data);triggerSync();render();
+    showUndoToast('Score removed.',()=>{if(!S.data.tests)S.data.tests=[];S.data.tests.push(removed);saveLocal(S.data);triggerSync();render();});
   },
 
   // ── Google auth ──
@@ -3462,8 +3660,9 @@ const A={
   },
 
   'del-sess':(btn)=>{
-    if(!confirm('Delete this session?'))return;
-    S.data.sessions=S.data.sessions.filter(s=>s.id!==btn.dataset.id);saveLocal(S.data);triggerSync();render();showToast('Removed.','✕');
+    const removed=S.data.sessions.find(s=>s.id===btn.dataset.id);if(!removed)return;
+    S.data.sessions=S.data.sessions.filter(s=>s.id!==btn.dataset.id);saveLocal(S.data);triggerSync();render();
+    showUndoToast('Session removed.',()=>{S.data.sessions.push(removed);saveLocal(S.data);triggerSync();render();});
   },
 
   'use-grace':()=>{
@@ -3528,6 +3727,45 @@ const A={
   },
 
   'toggle-export':()=>{S.showExport=!S.showExport;render();},
+  'toggle-notif':async()=>{
+    if(!('Notification' in window)){showToast('Notifications not supported in this browser.','!');return;}
+    if(Notification.permission==='granted'){showToast('Notifications already enabled. Disable in browser settings.','✓');return;}
+    const perm=await Notification.requestPermission();
+    if(perm==='granted'){showToast('Streak reminders enabled for 9pm.','🔔');render();}
+    else showToast('Permission denied. Enable in browser settings.','!');
+  },
+  'toggle-dark':()=>{
+    S.darkMode=!S.darkMode;
+    localStorage.setItem('mer_dark',S.darkMode?'1':'0');
+    document.documentElement.setAttribute('data-theme',S.darkMode?'dark':'light');
+    document.querySelector('meta[name="theme-color"]')?.setAttribute('content',S.darkMode?'#141210':'#F5F2EC');
+    render();
+  },
+  'export-json':()=>{
+    const blob=new Blob([JSON.stringify(S.data,null,2)],{type:'application/json'});
+    const a=document.createElement('a');a.href=URL.createObjectURL(blob);
+    a.download=`meridian-backup-${today()}.json`;a.click();URL.revokeObjectURL(a.href);
+    showToast('Backup downloaded.','↓');
+  },
+  'import-json':()=>{
+    const inp=document.getElementById('json-import-input');
+    if(!inp)return;
+    inp.onchange=e=>{
+      const f=e.target.files?.[0];if(!f)return;
+      const reader=new FileReader();
+      reader.onload=ev=>{
+        try{
+          const d=JSON.parse(ev.target.result);
+          if(!d.sessions||!d.subjects){showToast('Invalid backup file.','!');return;}
+          if(!confirm(`Restore backup? This will replace your current data (${S.data.sessions.length} sessions → ${d.sessions.length} sessions).`))return;
+          S.data=d;saveLocal(S.data);triggerSync();render();
+          showToast(`Restored ${d.sessions.length} sessions.`,'↑');
+        }catch(err){showToast('Could not read file.','!');}
+      };
+      reader.readAsText(f);inp.value='';
+    };
+    inp.click();
+  },
   'copy-export':()=>{
     navigator.clipboard?.writeText(exportCode(S.data)).then(()=>showToast('Copied!','⧉')).catch(()=>showToast('Select the code manually.','⧉'));
   },
@@ -3741,11 +3979,16 @@ function attach(){
 
   // Global keyboard shortcuts — on document so they always work
   document.addEventListener('keydown',e=>{
-    if(e.key==='l'&&!S.modal&&S.data&&!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName)){A['open-log']();}
+    const noInput=!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
+    if(e.key==='l'&&!S.modal&&S.data&&noInput){A['open-log']();}
+    if(e.key==='t'&&!S.modal&&S.data&&noInput){S.view='timer';S.modal=null;render();return;}
+    if(e.key==='d'&&!S.modal&&S.data&&noInput){S.view='dashboard';S.modal=null;render();return;}
+    if(e.key==='p'&&!S.modal&&S.data&&noInput){S.view='progress';S.modal=null;render();return;}
+    if(e.key==='h'&&!S.modal&&S.data&&noInput){S.view='history';S.modal=null;render();return;}
     if(e.key==='Escape'){
       if(pdfViewerState){A['close-pdf']();return;}
-      if(S.modal){S.modal=null;document.body.classList.remove('modal-open');render();return;}
-      if(S.moreMenu){S.moreMenu=false;render();return;}
+      if(S.modal){closeModalSmooth();return;}
+      if(S.moreMenu){closeMoreSmooth();return;}
       if(S.tutStep){S.tutStep=0;document.getElementById('tut-overlay')?.remove();}
     }
   });
@@ -3754,35 +3997,77 @@ function attach(){
   const icsInput=document.getElementById('ics-file-input');
   icsInput.addEventListener('change',e=>{const f=e.target.files?.[0];if(f)handleICSFile(f);icsInput.value='';});
 
-  // ── Swipe-to-dismiss modals on mobile ──
-  let swipeStartY=0,swipeModal=null,swipeDelta=0;
+  // ── Swipe-to-dismiss modals & more menu on mobile ──
+  let swipeStartY=0,swipeEl=null,swipeDelta=0,swipeType=null,swipeLastY=0,swipeLastT=0,swipeVelocity=0;
   root.addEventListener('touchstart',e=>{
+    // Check more-menu sheet first
+    const moreSheet=e.target.closest('.more-menu');
+    if(moreSheet){
+      swipeStartY=e.touches[0].clientY;swipeEl=moreSheet;swipeDelta=0;swipeType='more';
+      swipeLastY=swipeStartY;swipeLastT=Date.now();swipeVelocity=0;
+      return;
+    }
+    // Then check modals — allow swipe from top 120px, handle, or header
     const modal=e.target.closest('.modal');
     if(!modal)return;
-    // Only initiate swipe from the top part or handle
     const rect=modal.getBoundingClientRect();
     const touchY=e.touches[0].clientY;
-    if(touchY-rect.top>80&&!e.target.closest('.mhandle'))return;
-    swipeStartY=e.touches[0].clientY;swipeModal=modal;swipeDelta=0;
+    const isHandle=e.target.closest('.mhandle')||e.target.closest('.modal-header');
+    if(touchY-rect.top>120&&!isHandle)return;
+    swipeStartY=e.touches[0].clientY;swipeEl=modal;swipeDelta=0;swipeType='modal';
+    swipeLastY=swipeStartY;swipeLastT=Date.now();swipeVelocity=0;
   },{passive:true});
   root.addEventListener('touchmove',e=>{
-    if(!swipeModal)return;
-    swipeDelta=e.touches[0].clientY-swipeStartY;
+    if(!swipeEl)return;
+    const curY=e.touches[0].clientY;
+    const now=Date.now();
+    const dt=now-swipeLastT;
+    if(dt>0)swipeVelocity=(curY-swipeLastY)/dt; // px/ms
+    swipeLastY=curY;swipeLastT=now;
+    swipeDelta=curY-swipeStartY;
     if(swipeDelta>0){
-      swipeModal.classList.add('swiping');
-      swipeModal.style.transform=`translateY(${swipeDelta}px)`;
+      swipeEl.classList.add('swiping');
+      const resist=swipeType==='more'?swipeDelta:swipeDelta*0.8;
+      swipeEl.style.transform=`translateY(${resist}px)`;
+      if(swipeType==='more'){
+        const overlay=document.querySelector('.more-menu-overlay');
+        if(overlay)overlay.style.opacity=Math.max(0,1-swipeDelta/200);
+      }
     }
   },{passive:true});
   root.addEventListener('touchend',()=>{
-    if(!swipeModal)return;
-    if(swipeDelta>100){
-      swipeModal.classList.add('dismiss');
-      setTimeout(()=>{S.modal=null;document.body.classList.remove('modal-open');render();},250);
-    }else if(swipeModal){
-      swipeModal.classList.remove('swiping');
-      swipeModal.style.transform='';
+    if(!swipeEl)return;
+    // Dismiss if past threshold OR flicked fast (velocity > 0.4 px/ms)
+    const threshold=swipeType==='more'?50:80;
+    const flicked=swipeVelocity>0.4;
+    if(swipeDelta>threshold||flicked){
+      // Calculate remaining distance and match finger velocity
+      const elRect=swipeEl.getBoundingClientRect();
+      const remaining=window.innerHeight-elRect.top;
+      // Duration based on velocity — clamp between 120ms and 300ms
+      const speed=Math.max(swipeVelocity,0.5); // min speed so it doesn't hang
+      const dur=Math.min(300,Math.max(120,remaining/speed));
+      swipeEl.classList.remove('swiping');
+      swipeEl.style.transition=`transform ${dur}ms cubic-bezier(.4,0,1,1)`;
+      swipeEl.style.transform=`translateY(100%)`;
+      if(swipeType==='more'){
+        const overlay=document.querySelector('.more-menu-overlay');
+        if(overlay){overlay.style.transition=`opacity ${dur}ms ease`;overlay.style.opacity='0';}
+        setTimeout(()=>{S.moreMenu=false;render();},dur);
+      }else{
+        setTimeout(()=>{S.modal=null;document.body.classList.remove('modal-open');render();},dur);
+      }
+    }else if(swipeEl){
+      swipeEl.classList.remove('swiping');
+      swipeEl.style.transition='transform .2s cubic-bezier(.32,.72,0,1)';
+      swipeEl.style.transform='';
+      setTimeout(()=>{if(swipeEl)swipeEl.style.transition='';},200);
+      if(swipeType==='more'){
+        const overlay=document.querySelector('.more-menu-overlay');
+        if(overlay){overlay.style.transition='opacity .2s ease';overlay.style.opacity='';setTimeout(()=>{if(overlay)overlay.style.transition='';},200);}
+      }
     }
-    swipeModal=null;swipeDelta=0;
+    swipeEl=null;swipeDelta=0;swipeType=null;
   },{passive:true});
 }
 
@@ -3810,6 +4095,8 @@ window._meridianHandleAuthResult=function(result,provider='Google'){
    INIT
 ════════════════════════════════ */
 (async function init(){
+  // Dark mode init
+  if(S.darkMode){document.documentElement.setAttribute('data-theme','dark');document.querySelector('meta[name="theme-color"]')?.setAttribute('content','#141210');}
   const d=loadLocal();
   const authed=localStorage.getItem(AUTH_KEY);
   if(d){
