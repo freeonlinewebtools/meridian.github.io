@@ -2,6 +2,7 @@
    CONSTANTS
 ════════════════════════════════ */
 const KEY='mer_v4', SKEY='mer_sync', AUTH_KEY='mer_authed';
+const IS_LOCAL = location.hostname==='localhost'||location.hostname==='127.0.0.1'||location.hostname==='0.0.0.0'||location.protocol==='file:';
 
 // Subject topics — pre-loaded per subject code
 const SUBJECT_TOPICS = {
@@ -12,6 +13,21 @@ const SUBJECT_TOPICS = {
   '11PHY6': ['Kinematics','Dynamics','Forces','Energy','Waves','Thermodynamics','Electricity','Magnetism','Nuclear Physics','Relativity'],
   '11ENA5b':['Essay Writing','Creative Writing','Close Reading','Textual Analysis','Module A','Module B','Module C','Common Module','Belonging','Discovery'],
   '11EST3': ['Engineering Principles','Design Process','Structures','Materials','Mechanisms','Electronics','Hydraulics','CAD','Project Management','Testing'],
+  '_hms':    ['Hospitality','Food Safety','Nutrition','Menu Planning','Kitchen Operations','Food Preparation','Catering','Events','Service Styles','Industry Knowledge'],
+  '_sac':    ['Personal & Social Identity','Intercultural Communication','Social Inclusion & Exclusion','Belief Systems','Micro & Macro Worlds','Social & Cultural Continuity & Change','PIP','Research Methods','Cross-Cultural Comparisons','Social Conformity & Nonconformity'],
+  '_bus':    ['Operations','Marketing','Finance','Human Resources','Business Planning','Global Business','Nature of Business','Business Management'],
+  '_legal':  ['Crime','Human Rights','Family','Workplace','Shelter','World Order','Legal Processes','Law Reform'],
+  '_geo':    ['Biophysical Interactions','Ecosystems at Risk','Urban Places','People & Economic Activity','Megacities','Development Geography'],
+  '_drama':  ['Australian Drama','Studies in Drama','Group Performance','Individual Project','Theatrical Traditions','Playbuilding'],
+  '_cafs':   ['Research Methodology','Groups in Context','Parenting & Caring','Social Impact of Technology','Individuals & Work','Community & Family Structures'],
+  '_sor':    ['Religion & Belief Systems','Religious Tradition Depth Study','Religion & Peace','Religion & Ethics','Ritual','Sacred Texts'],
+  '_dt':     ['Design & Technology Projects','Innovation & Emerging Tech','Designing & Producing','Project Management','Sketching & CAD','Material Properties'],
+  '_food':   ['Food Availability','Nutrition','Food Quality','The Australian Food Industry','Food Manufacture','Food Product Development'],
+  '_txtl':   ['Design','Properties of Textiles','The Australian Textiles Industry','Colouration','Construction','Textile Arts'],
+  '_ag':     ['Farm Case Study','Plant Production','Animal Production','Farm Product Study','Elective'],
+  '_lang':   ['Prescribed Text','Listening','Reading','Writing','Speaking','Grammar','Vocabulary','Culture'],
+  '_esci':   ['Earth\'s Resources','Plate Tectonics','Hazards','Climate Science','Renewable Energy','The Carbon Cycle','Water','Atmosphere'],
+  '_inv':    ['Cause & Effect','Scientific Models','Theories & Laws','Science & Technology','Practical Investigations'],
   // Generic fallbacks by subject name keywords
   '_math':   ['Algebra','Calculus','Trigonometry','Statistics','Proof','Functions','Series','Vectors','Complex Numbers','Geometry'],
   '_science':['Theory','Practical','Lab Report','Equations','Diagrams','Module Content','Past Papers','Practice Questions'],
@@ -23,9 +39,24 @@ function getTopicsForSubject(sub) {
   if(!sub) return SUBJECT_TOPICS['_default'];
   if(SUBJECT_TOPICS[sub.icsCode]) return SUBJECT_TOPICS[sub.icsCode];
   const name = (sub.name||'').toLowerCase();
-  if(name.includes('math')||name.includes('ext')) return SUBJECT_TOPICS['_math'];
+  if(name.includes('math')||name.includes('ext 1')||name.includes('ext 2')||name.includes('standard')) return SUBJECT_TOPICS['_math'];
   if(name.includes('chem')||name.includes('bio')||name.includes('phys')) return SUBJECT_TOPICS['_science'];
-  if(name.includes('english')) return SUBJECT_TOPICS['_english'];
+  if(name.includes('earth')||name.includes('environmental')) return SUBJECT_TOPICS['_esci'];
+  if(name.includes('investigating science')) return SUBJECT_TOPICS['_inv'];
+  if(name.includes('english')||name.includes('eal')) return SUBJECT_TOPICS['_english'];
+  if(name.includes('hms')||name.includes('hospitality')) return SUBJECT_TOPICS['_hms'];
+  if(name.includes('society')||name.includes('culture')) return SUBJECT_TOPICS['_sac'];
+  if(name.includes('business')) return SUBJECT_TOPICS['_bus'];
+  if(name.includes('legal')) return SUBJECT_TOPICS['_legal'];
+  if(name.includes('geography')) return SUBJECT_TOPICS['_geo'];
+  if(name.includes('drama')) return SUBJECT_TOPICS['_drama'];
+  if(name.includes('cafs')) return SUBJECT_TOPICS['_cafs'];
+  if(name.includes('religion')) return SUBJECT_TOPICS['_sor'];
+  if(name.includes('design & tech')) return SUBJECT_TOPICS['_dt'];
+  if(name.includes('food tech')) return SUBJECT_TOPICS['_food'];
+  if(name.includes('textil')) return SUBJECT_TOPICS['_txtl'];
+  if(name.includes('agricul')) return SUBJECT_TOPICS['_ag'];
+  if(name.includes('japanese')||name.includes('french')||name.includes('german')||name.includes('italian')||name.includes('chinese')||name.includes('korean')||name.includes('latin')||name.includes('spanish')||name.includes('arabic')||name.includes('greek')||name.includes('indonesian')) return SUBJECT_TOPICS['_lang'];
   // Also use subject's custom topics if defined
   if(sub.topics && sub.topics.length) return sub.topics;
   return SUBJECT_TOPICS['_default'];
@@ -49,6 +80,8 @@ const DEFAULT_SUBS=[
   {id:'mae', name:'Maths Advanced',   abbr:'MA',target:60,icsCode:'11MAE2', color:4},
   {id:'eng', name:'English Advanced', abbr:'EN',target:45,icsCode:'11ENA5b',color:5},
   {id:'est', name:'Engineering',      abbr:'ES',target:45,icsCode:'11EST3', color:6},
+  {id:'hms', name:'HMS',              abbr:'HM',target:45,icsCode:'',      color:7},
+  {id:'sac', name:'Society & Culture',abbr:'SC',target:45,icsCode:'',      color:8},
 ];
 
 /* ════════════════════════════════
@@ -509,7 +542,7 @@ async function syncPull(sc){
     return{ok:true,data:j.record.meridian};
   }catch{return{ok:false,err:'Network error'};}
 }
-function triggerSync(){clearTimeout(syncDebounce);syncDebounce=setTimeout(async()=>{const sc=loadSync();if(!sc.apiKey)return;sc.status='syncing';saveSync(sc);updateSyncDot();const r=await syncPush(S.data,sc);sc.status=r.ok?'ok':'err';sc.lastSynced=r.ok?Date.now():sc.lastSynced;if(r.binId)sc.binId=r.binId;saveSync(sc);updateSyncDot();},1200);}
+function triggerSync(){if(IS_LOCAL)return;clearTimeout(syncDebounce);syncDebounce=setTimeout(async()=>{const sc=loadSync();if(!sc.apiKey)return;sc.status='syncing';saveSync(sc);updateSyncDot();const r=await syncPush(S.data,sc);sc.status=r.ok?'ok':'err';sc.lastSynced=r.ok?Date.now():sc.lastSynced;if(r.binId)sc.binId=r.binId;saveSync(sc);updateSyncDot();},1200);}
 
 /* ════════════════════════════════
    FIRESTORE LEADERBOARD
@@ -630,7 +663,19 @@ function checkStreakReminder(){
 function renderLiveElements(){
   // Update Now/Next card
   const nn=document.getElementById('nownext');
-  if(nn&&S.data){nn.outerHTML=renderNowNext();}
+  if(nn&&S.data){
+    const tmp=document.createElement('div');tmp.innerHTML=renderNowNext();const fresh=tmp.firstElementChild;
+    // Only do full replace if card type changed; otherwise patch text content in-place
+    if(nn.className!==fresh.className){nn.outerHTML=fresh.outerHTML;}
+    else{
+      // Patch countdown text
+      const oldCd=nn.querySelector('#live-countdown'),newCd=fresh.querySelector('#live-countdown');
+      if(oldCd&&newCd&&oldCd.innerHTML!==newCd.innerHTML)oldCd.innerHTML=newCd.innerHTML;
+      // Patch detail line
+      const oldDet=nn.querySelector('.live-detail'),newDet=fresh.querySelector('.live-detail');
+      if(oldDet&&newDet&&oldDet.innerHTML!==newDet.innerHTML)oldDet.innerHTML=newDet.innerHTML;
+    }
+  }
   // Update period progress bars
   document.querySelectorAll('[data-period-prog]').forEach(el=>{
     const s=new Date(el.dataset.start),e=new Date(el.dataset.end),now=new Date();
@@ -752,21 +797,70 @@ function render(){
    PRESET SUBJECTS FOR ONBOARDING
 ════════════════════════════════ */
 const ALL_PRESET_SUBS = [
-  {id:'chem', name:'Chemistry',        abbr:'CH', target:60, icsCode:'11CHE4',  color:0},
-  {id:'bio',  name:'Biology',          abbr:'BI', target:60, icsCode:'11BIO1',  color:1},
-  {id:'phys', name:'Physics',          abbr:'PH', target:60, icsCode:'11PHY6',  color:2},
-  {id:'max',  name:'Maths Ext 1',      abbr:'MX', target:60, icsCode:'11MAX2',  color:3},
-  {id:'mae',  name:'Maths Advanced',   abbr:'MA', target:60, icsCode:'11MAE2',  color:4},
-  {id:'eng',  name:'English Advanced', abbr:'EN', target:45, icsCode:'11ENA5b', color:5},
-  {id:'est',  name:'Engineering',      abbr:'ES', target:45, icsCode:'11EST3',  color:6},
-  {id:'legal',name:'Legal Studies',    abbr:'LS', target:45, icsCode:'',        color:7},
-  {id:'eco',  name:'Economics',        abbr:'EC', target:45, icsCode:'',        color:0},
-  {id:'mod',  name:'Modern History',   abbr:'MH', target:45, icsCode:'',        color:1},
-  {id:'anc',  name:'Ancient History',  abbr:'AH', target:45, icsCode:'',        color:2},
-  {id:'sdd',  name:'Software Design',  abbr:'SD', target:45, icsCode:'',        color:3},
-  {id:'vis',  name:'Visual Arts',      abbr:'VA', target:45, icsCode:'',        color:4},
-  {id:'pdhpe',name:'PDHPE',            abbr:'PE', target:45, icsCode:'',        color:5},
-  {id:'mus',  name:'Music',            abbr:'MU', target:45, icsCode:'',        color:6},
+  // Sciences
+  {id:'chem', name:'Chemistry',            abbr:'CH', target:60, icsCode:'11CHE4',  color:0},
+  {id:'bio',  name:'Biology',              abbr:'BI', target:60, icsCode:'11BIO1',  color:1},
+  {id:'phys', name:'Physics',              abbr:'PH', target:60, icsCode:'11PHY6',  color:2},
+  {id:'esci', name:'Earth & Environmental',abbr:'EE', target:45, icsCode:'',        color:3},
+  {id:'inv',  name:'Investigating Science',abbr:'IS', target:45, icsCode:'',        color:4},
+  // Maths
+  {id:'max',  name:'Maths Ext 1',          abbr:'MX', target:60, icsCode:'11MAX2',  color:3},
+  {id:'mx2',  name:'Maths Ext 2',          abbr:'X2', target:60, icsCode:'',        color:4},
+  {id:'mae',  name:'Maths Advanced',       abbr:'MA', target:60, icsCode:'11MAE2',  color:5},
+  {id:'mst',  name:'Maths Standard 2',     abbr:'MS', target:45, icsCode:'',        color:6},
+  {id:'ms1',  name:'Maths Standard 1',     abbr:'M1', target:45, icsCode:'',        color:7},
+  // English
+  {id:'eng',  name:'English Advanced',     abbr:'EN', target:45, icsCode:'11ENA5b', color:5},
+  {id:'ens',  name:'English Standard',     abbr:'ES', target:45, icsCode:'',        color:6},
+  {id:'ex1',  name:'English Ext 1',        abbr:'E1', target:45, icsCode:'',        color:7},
+  {id:'ex2',  name:'English Ext 2',        abbr:'E2', target:45, icsCode:'',        color:0},
+  {id:'esl',  name:'EAL/D',               abbr:'ED', target:45, icsCode:'',        color:1},
+  // HSIE
+  {id:'eco',  name:'Economics',            abbr:'EC', target:45, icsCode:'',        color:0},
+  {id:'bus',  name:'Business Studies',     abbr:'BS', target:45, icsCode:'',        color:1},
+  {id:'legal',name:'Legal Studies',        abbr:'LS', target:45, icsCode:'',        color:2},
+  {id:'mod',  name:'Modern History',       abbr:'MH', target:45, icsCode:'',        color:3},
+  {id:'anc',  name:'Ancient History',      abbr:'AH', target:45, icsCode:'',        color:4},
+  {id:'hext', name:'History Extension',    abbr:'HX', target:45, icsCode:'',        color:5},
+  {id:'geo',  name:'Geography',            abbr:'GE', target:45, icsCode:'',        color:6},
+  {id:'sac',  name:'Society & Culture',    abbr:'SC', target:45, icsCode:'',        color:7},
+  {id:'sor1', name:'Studies of Religion I', abbr:'R1', target:45, icsCode:'',       color:0},
+  {id:'sor2', name:'Studies of Religion II',abbr:'R2', target:45, icsCode:'',       color:1},
+  {id:'ab',   name:'Aboriginal Studies',   abbr:'AB', target:45, icsCode:'',        color:2},
+  // TAS
+  {id:'est',  name:'Engineering Studies',  abbr:'EG', target:45, icsCode:'11EST3',  color:6},
+  {id:'sdd',  name:'Software Design',      abbr:'SD', target:45, icsCode:'',        color:7},
+  {id:'ipt',  name:'Info Processes & Tech',abbr:'IT', target:45, icsCode:'',        color:0},
+  {id:'dt',   name:'Design & Technology',  abbr:'DT', target:45, icsCode:'',        color:1},
+  {id:'food', name:'Food Technology',      abbr:'FT', target:45, icsCode:'',        color:2},
+  {id:'txtl', name:'Textiles & Design',    abbr:'TX', target:45, icsCode:'',        color:3},
+  {id:'ind',  name:'Industrial Technology',abbr:'IN', target:45, icsCode:'',        color:4},
+  {id:'ag',   name:'Agriculture',          abbr:'AG', target:45, icsCode:'',        color:5},
+  // PDHPE
+  {id:'pdhpe',name:'PDHPE',               abbr:'PE', target:45, icsCode:'',        color:5},
+  {id:'cafs', name:'CAFS',                abbr:'CF', target:45, icsCode:'',        color:6},
+  {id:'spls', name:'Sport Lifestyle Rec',  abbr:'SL', target:45, icsCode:'',        color:7},
+  // Creative Arts
+  {id:'vis',  name:'Visual Arts',          abbr:'VA', target:45, icsCode:'',        color:0},
+  {id:'mus',  name:'Music 1',             abbr:'M1', target:45, icsCode:'',        color:1},
+  {id:'mus2', name:'Music 2',             abbr:'M2', target:45, icsCode:'',        color:2},
+  {id:'dra',  name:'Drama',               abbr:'DR', target:45, icsCode:'',        color:3},
+  // VET / Other
+  {id:'hms',  name:'Hospitality (HMS)',    abbr:'HM', target:45, icsCode:'',        color:4},
+  {id:'vet',  name:'VET Entertainment',    abbr:'VE', target:45, icsCode:'',        color:5},
+  {id:'vetc', name:'VET Construction',     abbr:'VC', target:45, icsCode:'',        color:6},
+  // Languages
+  {id:'jpn',  name:'Japanese',            abbr:'JP', target:45, icsCode:'',        color:0},
+  {id:'fre',  name:'French',              abbr:'FR', target:45, icsCode:'',        color:1},
+  {id:'ger',  name:'German',              abbr:'GR', target:45, icsCode:'',        color:2},
+  {id:'ita',  name:'Italian',             abbr:'IT', target:45, icsCode:'',        color:3},
+  {id:'chn',  name:'Chinese',             abbr:'CN', target:45, icsCode:'',        color:4},
+  {id:'kor',  name:'Korean',              abbr:'KR', target:45, icsCode:'',        color:5},
+  {id:'lat',  name:'Latin',               abbr:'LA', target:45, icsCode:'',        color:6},
+  {id:'span', name:'Spanish',             abbr:'SP', target:45, icsCode:'',        color:7},
+  {id:'arb',  name:'Arabic',              abbr:'AR', target:45, icsCode:'',        color:0},
+  {id:'grk',  name:'Greek',               abbr:'GK', target:45, icsCode:'',        color:1},
+  {id:'indo', name:'Indonesian',           abbr:'ID', target:45, icsCode:'',        color:2},
 ];
 
 function renderLogin(){
@@ -4099,7 +4193,19 @@ window._meridianHandleAuthResult=function(result,provider='Google'){
   if(S.darkMode){document.documentElement.setAttribute('data-theme','dark');document.querySelector('meta[name="theme-color"]')?.setAttribute('content','#141210');}
   const d=loadLocal();
   const authed=localStorage.getItem(AUTH_KEY);
-  if(d){
+  // Localhost: skip login entirely, create default account if needed
+  if(IS_LOCAL){
+    if(d){
+      if(!d.timetable)d.timetable=[];
+      if(!d.tests)d.tests=[];
+      S.data=d;
+    }else{
+      S.data=newAccount('Local','0000',11,DEFAULT_SUBS.slice());
+      saveLocal(S.data);
+    }
+    S.view='dashboard';
+    localStorage.setItem(AUTH_KEY,'1');
+  } else if(d){
     if(!d.timetable)d.timetable=[];
     if(!d.tests)d.tests=[];
     // Auto-login: if authed flag set, go straight to dashboard
@@ -4109,9 +4215,9 @@ window._meridianHandleAuthResult=function(result,provider='Google'){
     // else: show auto-auth screen (already handled in renderLogin)
   }
   render();attach();
-  if(S.data){startLiveTick();lbPush().then(()=>lbGetCached(true)).then(d2=>{if(d2){S.lbData=d2;if(S.view==='dashboard'||S.view==='leaderboard')render();}}).catch(()=>{});}
-  // Check for redirect sign-in result
-  if(window.FIREBASE_CONFIG){
+  if(S.data){startLiveTick();if(!IS_LOCAL){lbPush().then(()=>lbGetCached(true)).then(d2=>{if(d2){S.lbData=d2;if(S.view==='dashboard'||S.view==='leaderboard')render();}}).catch(()=>{});}}
+  // Check for redirect sign-in result (skip on localhost)
+  if(window.FIREBASE_CONFIG&&!IS_LOCAL){
     try{
       const fbApp=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
       const{getAuth,getRedirectResult}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
@@ -4120,8 +4226,8 @@ window._meridianHandleAuthResult=function(result,provider='Google'){
       if(result&&result.user) window._meridianHandleAuthResult(result);
     }catch(e){/* no redirect result */}
   }
-  // Auto-pull if on fresh device with no local data
-  if(!d){
+  // Auto-pull if on fresh device with no local data (skip on localhost)
+  if(!d&&!IS_LOCAL){
     const sc=loadSync();
     if(sc.apiKey&&sc.binId){
       syncPull(sc).then(r=>{
