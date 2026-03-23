@@ -180,6 +180,138 @@ function isRisk(sessions){return new Date().getHours()>=17&&!todaySess(sessions)
 function graceAvail(data){if(!data.graceUsed)return true;return new Date(data.graceUsed+'T12:00:00')<new Date(weekMon()+'T12:00:00');}
 
 /* ════════════════════════════════
+   PSYCHOLOGY ENGINE
+════════════════════════════════ */
+
+// ── 1. Spaced repetition: topics due for review ──
+function getReviewTopics(sessions, subjects){
+  const thresholds=[1,3,7,14,30]; // days since last study
+  const real=sessions.filter(s=>s.subject!=='grace'&&s.topic);
+  const topicMap=new Map(); // key: "subId|topic" → {lastDate, subject, topic, daysSince}
+  real.forEach(s=>{
+    const k=s.subject+'|'+s.topic;
+    if(!topicMap.has(k)||s.date>topicMap.get(k).lastDate)
+      topicMap.set(k,{lastDate:s.date,subId:s.subject,topic:s.topic});
+  });
+  const t=today();
+  const due=[];
+  topicMap.forEach(v=>{
+    const diff=Math.floor((new Date(t+'T12:00:00')-new Date(v.lastDate+'T12:00:00'))/86400000);
+    const threshold=thresholds.find(th=>diff>=th);
+    if(threshold&&diff>=3){ // only flag if 3+ days
+      const sub=subjects.find(s=>s.id===v.subId);
+      due.push({...v,daysSince:diff,subName:sub?.name||'',urgency:diff>=14?'high':diff>=7?'med':'low'});
+    }
+  });
+  due.sort((a,b)=>b.daysSince-a.daysSince);
+  return due.slice(0,5);
+}
+
+// ── 2. Interleaving: detect blocked practice ──
+function getInterleaveSuggestion(sessions, subjects){
+  const todayS=todaySess(sessions).sort((a,b)=>a.ts-b.ts);
+  if(todayS.length<2)return null;
+  const last2=todayS.slice(-2);
+  if(last2[0].subject!==last2[1].subject)return null;
+  const blockedSub=subjects.find(s=>s.id===last2[0].subject);
+  const blockedMins=todayS.filter(s=>s.subject===last2[0].subject).reduce((a,s)=>a+s.duration,0);
+  // Suggest least-studied subject this week
+  const mon=weekMon();
+  const weekSess=sessions.filter(s=>s.date>=mon&&s.date<=today()&&s.subject!=='grace');
+  const subMins=new Map();
+  subjects.forEach(s=>subMins.set(s.id,0));
+  weekSess.forEach(s=>{if(subMins.has(s.subject))subMins.set(s.subject,subMins.get(s.subject)+s.duration);});
+  let least=null,leastMins=Infinity;
+  subjects.forEach(s=>{if(s.id!==last2[0].subject&&(subMins.get(s.id)||0)<leastMins){leastMins=subMins.get(s.id)||0;least=s;}});
+  if(!least)return null;
+  return{blockedSub:blockedSub?.name,blockedMins,suggestSub:least.name,suggestId:least.id};
+}
+
+// ── 3. Growth mindset messages ──
+function getEncouragement(context){
+  const msgs={
+    lowConf:[
+      "This is tough right now — that's where growth happens.",
+      "Struggling means your brain is building new connections.",
+      "You haven't mastered this yet. The 'yet' is everything.",
+    ],
+    brokenStreak:[
+      "Streaks reset, but your knowledge doesn't. Pick up where you left off.",
+      "A break isn't failure — what matters is starting again.",
+      "The best students aren't perfect. They're persistent.",
+    ],
+    scoreDip:[
+      "One score doesn't define your trajectory. Zoom out.",
+      "Dips are data, not verdicts. Adjust and keep going.",
+      "Your recent study sessions show you're putting in the work — it'll click.",
+    ],
+    milestone:[
+      "Consistency beats intensity. You're proving it.",
+      "This kind of discipline compounds. Future you will thank you.",
+      "Most people don't make it this far. You did.",
+    ],
+    comeback:[
+      "Welcome back. Every session forward counts.",
+      "You showed up again — that's the hardest part done.",
+    ],
+    highEffort:[
+      "Effort is the one thing fully in your control. You're using it well.",
+      "Hard work isn't glamorous, but it's what separates the top 10%.",
+    ],
+  };
+  const pool=msgs[context]||msgs.highEffort;
+  return pool[Math.floor(Math.random()*pool.length)];
+}
+
+// ── 4. Competence trend: 2-week rolling comparison ──
+function getSubjectTrends(sessions, subjects){
+  const t=new Date(today()+'T12:00:00');
+  const d14=new Date(t);d14.setDate(d14.getDate()-14);
+  const d28=new Date(t);d28.setDate(d28.getDate()-28);
+  const d14s=localDate(d14),d28s=localDate(d28);
+  return subjects.map(sub=>{
+    const all=sessions.filter(s=>s.subject===sub.id&&s.subject!=='grace');
+    // Study time trend
+    const recent=all.filter(s=>s.date>d14s&&s.date<=today());
+    const prev=all.filter(s=>s.date>d28s&&s.date<=d14s);
+    const recentMins=recent.reduce((a,s)=>a+s.duration,0);
+    const prevMins=prev.reduce((a,s)=>a+s.duration,0);
+    // Confidence trend
+    const confRecent=recent.filter(s=>s.confidence>0);
+    const confPrev=prev.filter(s=>s.confidence>0);
+    const avgConfR=confRecent.length?confRecent.reduce((a,s)=>a+s.confidence,0)/confRecent.length:null;
+    const avgConfP=confPrev.length?confPrev.reduce((a,s)=>a+s.confidence,0)/confPrev.length:null;
+    const confDelta=avgConfR!=null&&avgConfP!=null?Math.round((avgConfR-avgConfP)*10)/10:null;
+    const minsDelta=recentMins-prevMins;
+    return{sub,recentMins,prevMins,minsDelta,avgConfR,confDelta};
+  }).filter(t=>t.recentMins>0||t.prevMins>0);
+}
+
+// ── 5. Variable rewards ──
+const BONUS_MESSAGES=[
+  {type:'fact',msg:'The HSC has been running since 1967 — over 55 years of students before you.'},
+  {type:'fact',msg:'Spaced repetition can boost retention by up to 200% compared to cramming.'},
+  {type:'fact',msg:'The testing effect: quizzing yourself beats re-reading notes by 50%+.'},
+  {type:'fact',msg:'Interleaving subjects (mixing them up) outperforms blocked study by 43%.'},
+  {type:'fact',msg:'Your brain consolidates learning during sleep. Rest is part of the process.'},
+  {type:'fact',msg:'Peak focus for most students lasts 25-35 minutes. Then take a break.'},
+  {type:'fact',msg:'Writing by hand activates more brain regions than typing.'},
+  {type:'fact',msg:'Teaching a concept to someone else is the fastest way to master it.'},
+  {type:'challenge',msg:'Challenge: Study 3 different subjects today.'},
+  {type:'challenge',msg:'Challenge: Try explaining what you just studied out loud.'},
+  {type:'challenge',msg:'Challenge: Write 3 practice questions on what you just covered.'},
+  {type:'challenge',msg:'Challenge: Do one past paper question before your next session.'},
+  {type:'celebrate',msg:'This session just pushed your weekly total even higher.'},
+  {type:'celebrate',msg:'You\'re building momentum. Each session makes the next one easier.'},
+  {type:'celebrate',msg:'Consistency is the cheat code. You\'re using it.'},
+];
+
+function getVariableReward(){
+  if(Math.random()>0.25)return null; // 25% chance
+  return BONUS_MESSAGES[Math.floor(Math.random()*BONUS_MESSAGES.length)];
+}
+
+/* ════════════════════════════════
    SCORE PREDICTION ENGINE
 ════════════════════════════════ */
 function getSubjectTests(tests,subId){return(tests||[]).filter(t=>t.subject===subId).sort((a,b)=>a.date.localeCompare(b.date));}
@@ -976,16 +1108,19 @@ function renderNowNext(){
 function getMotivation(sessions,streak){
   const h=new Date().getHours();
   const tMin=todaySess(sessions).reduce((a,s)=>a+s.duration,0);
-  if(tMin>=120)return'Monster session today. Take a break.';
+  if(tMin>=180)return'Seriously impressive session. Rest your brain — you\'ve earned it.';
+  if(tMin>=120)return'2+ hours locked in. Take a proper break — your brain consolidates learning during rest.';
   if(tMin>=60)return'Solid progress. Keep the momentum.';
-  if(streak>=14)return'Two weeks strong. You\'re built different.';
-  if(streak>=7)return'A full week. Consistency is compounding.';
-  if(h<9)return'Early start? Smart move.';
-  if(h<12)return'Morning sessions hit different.';
-  if(h<17)return'Good time to knock out a session.';
-  if(h<20)return'Evening grind. Finish strong.';
-  if(tMin===0)return'Still time to keep the streak alive.';
-  return'Every session counts.';
+  if(streak>=30)return'A month of consistency. That kind of discipline compounds.';
+  if(streak>=14)return'Two weeks strong. You\'re building something most people can\'t.';
+  if(streak>=7)return'A full week. Consistency beats intensity every time.';
+  if(h<9)return'Early start? Peak focus happens in the morning for most people.';
+  if(h<12)return'Morning sessions hit different. Your brain is freshest now.';
+  if(h<17)return'Afternoon focus — try the Pomodoro method: 25 min on, 5 min off.';
+  if(h<20)return'Evening grind. Finish strong, then let your brain rest.';
+  if(tMin===0&&streak>3)return'Still time to keep the streak alive. Even 10 minutes counts.';
+  if(tMin===0)return'Small sessions add up. Start with just 15 minutes.';
+  return'Every session is an investment in future you.';
 }
 
 function renderDash(){
@@ -997,7 +1132,7 @@ function renderDash(){
   const h=new Date().getHours();
   const eName=esc(name);
   const greet=h<5?`Up late, ${eName}.`:h<12?`Morning, ${eName}.`:h<17?`Afternoon, ${eName}.`:`Evening, ${eName}.`;
-  const sMsg=streak===0?'Start your streak today.':risk?'Log before midnight — streak at risk.':streak===1?'Day 1. Come back tomorrow.':streak<7?`${streak} days straight.`:`${streak} days. Don't stop.`;
+  const sMsg=streak===0?'Start your streak today.':risk&&streak>=7?`Your ${streak}-day streak ends tonight. Even 10 minutes saves it.`:risk?'Log before midnight — streak at risk.':streak===1?'Day 1. Come back tomorrow.':streak<7?`${streak} days straight.`:`${streak} days. Don't stop.`;
   const R=37,CIRC=2*Math.PI*R,pct=Math.min(1,streak/30),dashVal=pct*CIRC;
   const daysActive=new Set(sessions.filter(s=>s.subject!=='grace').map(s=>s.date)).size;
   const avgHpd=daysActive>0?totalMins(sessions)/60/daysActive:0;
@@ -1085,7 +1220,7 @@ function renderDash(){
     </div>
   </div>
 
-  ${[7,14,21,30,50,100].includes(streak)?`<div class="streak-milestone">🎯 <strong>${streak}-day milestone!</strong> You're in the top tier. Keep it going.</div>`:''}
+  ${[7,14,21,30,50,100].includes(streak)?`<div class="streak-milestone">🎯 <strong>${streak}-day milestone!</strong> ${streak>=50?'Elite consistency. This is what separates the top 1%.':streak>=30?'A full month. The habit is locked in now.':streak>=14?'Two weeks proves it\'s not luck — it\'s discipline.':streak>=7?'One week down. Most people don\'t make it this far.':'Keep it going.'}</div>`:''}
 
   <div class="today-overview">
     <div class="ov-tile${tMins>=120?' green':''}">
@@ -1156,11 +1291,64 @@ function renderDash(){
     }).join('')}
   </div>
 
+  ${renderDashPsych(sessions,subjects)}
+
   <div class="sec"><span class="sec-lbl">Recent sessions</span><span class="sec-link" data-action="nav-history">All →</span></div>
   ${recent.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">No sessions yet</div><div class="empty-s">Use the timer or press L to log your first session — even 10 minutes counts.</div><div class="empty-action" data-action="open-log">+ Log first session</div></div>`
   :`<div class="sess-list">${recent.map(renderSessRow).join('')}</div>`}
 
   ${renderDashLb()}`;
+}
+
+function renderDashPsych(sessions,subjects){
+  let html='';
+
+  // ── Spaced repetition: topics due for review ──
+  const reviewTopics=getReviewTopics(sessions,subjects);
+  if(reviewTopics.length){
+    html+=`<div class="sec mb8"><span class="sec-lbl">Topics to review</span><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);letter-spacing:.06em;">SPACED REPETITION</span></div>
+    <div class="psych-review-card mb16">
+      ${reviewTopics.map(r=>{
+        const urgCol=r.urgency==='high'?'var(--err)':r.urgency==='med'?'var(--acc)':'var(--tx3)';
+        return`<div class="review-row">
+          <div class="review-dot" style="background:${urgCol};"></div>
+          <div class="review-info">
+            <div class="review-topic">${r.topic}</div>
+            <div class="review-sub">${r.subName} · ${r.daysSince}d ago</div>
+          </div>
+          <div class="review-action" data-action="quick-log" data-subject="${r.subId}">Study</div>
+        </div>`;
+      }).join('')}
+      <div class="review-hint">Reviewing at spaced intervals boosts retention by up to 200%.</div>
+    </div>`;
+  }
+
+  // ── Interleaving nudge ──
+  const interleave=getInterleaveSuggestion(sessions,subjects);
+  if(interleave){
+    html+=`<div class="psych-nudge mb16">
+      <div class="nudge-icon">🔀</div>
+      <div class="nudge-text">
+        <div class="nudge-title">Try switching subjects</div>
+        <div class="nudge-body">You've done ${fmtDur(interleave.blockedMins)} of ${interleave.blockedSub} today. Mixing in <strong data-action="quick-log" data-subject="${interleave.suggestId}" style="color:var(--acc);cursor:pointer;">${interleave.suggestSub}</strong> next could boost long-term retention.</div>
+      </div>
+    </div>`;
+  }
+
+  // ── Growth mindset: contextual encouragement ──
+  const real=sessions.filter(s=>s.subject!=='grace');
+  const recentConf=real.filter(s=>s.confidence>0).slice(-5);
+  const avgRecentConf=recentConf.length?recentConf.reduce((a,s)=>a+s.confidence,0)/recentConf.length:3;
+  const streak=getStreak(sessions);
+  let encourageCtx=null;
+  if(avgRecentConf<2.5&&recentConf.length>=3)encourageCtx='lowConf';
+  else if(streak===0&&real.length>10)encourageCtx='comeback';
+  else if(streak>=7)encourageCtx='milestone';
+  if(encourageCtx){
+    html+=`<div class="psych-encourage mb16">${getEncouragement(encourageCtx)}</div>`;
+  }
+
+  return html;
 }
 
 function renderDashLb(){
@@ -1563,12 +1751,30 @@ function renderProgress(){
       const avg=s.slice(-5).reduce((a,x)=>a+x.confidence,0)/Math.min(5,s.length);
       return avg<3;
     });
+    // Competence trend summary
+    const trends=getSubjectTrends(sessions,subjects);
+    const trendHtml=trends.filter(t=>t.confDelta!==null).length?`
+    <div class="psych-trends-card mb16">
+      <div class="trends-title">2-week trends</div>
+      <div class="trends-grid">${trends.filter(t=>t.confDelta!==null||t.minsDelta!==0).map(t=>{
+        const confArrow=t.confDelta>0?'↑':t.confDelta<0?'↓':'→';
+        const confCol=t.confDelta>0?'var(--ok)':t.confDelta<0?'var(--err)':'var(--tx3)';
+        const minsArrow=t.minsDelta>0?'↑':t.minsDelta<0?'↓':'→';
+        const minsCol=t.minsDelta>0?'var(--ok)':t.minsDelta<0?'var(--err)':'var(--tx3)';
+        return`<div class="trend-row">
+          <span class="trend-sub">${t.sub.abbr}</span>
+          ${t.confDelta!==null?`<span class="trend-badge" style="color:${confCol};">${confArrow} ${Math.abs(t.confDelta)} conf</span>`:''}
+          <span class="trend-badge" style="color:${minsCol};">${minsArrow} ${Math.abs(Math.round(t.minsDelta/60*10)/10)}h study</span>
+        </div>`;
+      }).join('')}</div>
+    </div>`:'';
+
     const insightHtml=weak.length?`
     <div class="insight-card warn">
       <div class="insight-icon">⚠</div>
       <div class="insight-text">
         <div class="insight-title">Weak areas: ${weak.map(s=>s.name).join(', ')}</div>
-        <div class="insight-body">Your recent confidence in ${weak.length===1?'this subject':'these subjects'} is low. Prioritise them this week.</div>
+        <div class="insight-body">${getEncouragement('lowConf')}</div>
       </div>
     </div>`:'';
     const topSub=subjects.find(sub=>{
@@ -1585,7 +1791,7 @@ function renderProgress(){
         <div class="insight-body">Consistently confident. Don't neglect it but you've got this one.</div>
       </div>
     </div>`:'';
-    return insightHtml+goodHtml+(cards.length?cards.join(''):`<div class="empty"><div class="empty-e">📊</div><div class="empty-t">Rate your sessions</div><div class="empty-s">Tap an emoji when logging to track confidence trends.</div></div>`);
+    return trendHtml+insightHtml+goodHtml+(cards.length?cards.join(''):`<div class="empty"><div class="empty-e">📊</div><div class="empty-t">Rate your sessions</div><div class="empty-s">Tap an emoji when logging to track confidence trends.</div></div>`);
   }
 
   function renderTopicsTab(){
@@ -1817,6 +2023,83 @@ const THSC_SUBJECTS = [
   {code:'2250', label:'English Advanced', unit:'Yr 11/12', color:5},
 ];
 
+// Bored of Studies resource category IDs per subject
+const BOS_CATEGORIES = {
+  'Maths Ext 1':{slug:'mathematics-extension-1',id:489},
+  'Maths Ext 2':{slug:'mathematics-extension-2',id:498},
+  'Maths Advanced':{slug:'mathematics-advanced',id:481},
+  'Biology':{slug:'biology',id:500},
+  'Physics':{slug:'physics',id:507},
+  'Chemistry':{slug:'chemistry',id:503},
+  'Engineering Studies':{slug:'engineering-studies',id:540},
+  'English Advanced':{slug:'english-advanced',id:462},
+};
+
+function getBosEntries(){
+  // Generate BoS category links for each subject + try scraping individual resources
+  const entries=[];
+  for(const[label,cat] of Object.entries(BOS_CATEGORIES)){
+    const thsc=THSC_SUBJECTS.find(s=>s.label===label);
+    const color=thsc?thsc.color:6;
+    entries.push({
+      id:`bos-cat-${cat.id}`,
+      title:`${label} — Notes, Trials & Resources`,
+      url:`https://boredofstudies.org/resources/categories/${cat.slug}.${cat.id}/`,
+      subject:label,
+      unit:thsc?.unit||'Yr 11/12',
+      source:'boredofstudies',
+      year:'',
+      type:'Notes & Trials',
+      hasSolutions:false,
+      color,
+      external:true,
+    });
+  }
+  return entries;
+}
+
+async function loadAllBosData(){
+  const fallback=getBosEntries();
+  // Try scraping individual resources from each category page
+  const scraped=[];
+  const fetches=Object.entries(BOS_CATEGORIES).map(async([label,cat])=>{
+    const thsc=THSC_SUBJECTS.find(s=>s.label===label);
+    const color=thsc?thsc.color:6;
+    try{
+      const r=await fetch(`https://boredofstudies.org/resources/categories/${cat.slug}.${cat.id}/?page=1`);
+      if(!r.ok)return;
+      const html=await r.text();
+      const parser=new DOMParser();
+      const doc=parser.parseFromString(html,'text/html');
+      const rows=doc.querySelectorAll('.dataList-row');
+      rows.forEach(row=>{
+        const a=row.querySelector('h3 a, .contentRow-title a');
+        if(!a)return;
+        const title=a.textContent.trim();
+        const href=a.getAttribute('href');
+        if(!title||!href||href.includes('/categories/'))return;
+        const url='https://boredofstudies.org'+(href.startsWith('/')?href:'/'+href);
+        const tl=title.toLowerCase();
+        let type='Notes';
+        if(tl.includes('trial'))type='Trial Paper';
+        else if(tl.includes('past paper')||tl.includes('hsc paper'))type='HSC Paper';
+        else if(tl.includes('solution')||tl.includes('marking'))type='Solutions';
+        else if(tl.includes('assessment')||tl.includes('exam')||tl.includes('test')||tl.includes('skills test'))type='Assessment';
+        scraped.push({
+          id:'bos-'+cat.id+'-'+href,
+          title,url,subject:label,
+          unit:thsc?.unit||'Yr 11/12',
+          source:'boredofstudies',year:'',type,
+          hasSolutions:false,color,external:true,
+        });
+      });
+    }catch(e){}
+  });
+  await Promise.all(fetches);
+  // If scraping worked, return individual resources; otherwise return category links
+  return scraped.length>0?scraped:fallback;
+}
+
 // HSCpapers.json course names to match subjects
 const HSC_COURSE_MAP = {
   'Chemistry':'Chemistry',
@@ -1929,6 +2212,12 @@ async function loadPapersData(force=false){
     }
   } catch(e){}
 
+  // 4. Load Bored of Studies resources (notes, trials, assessments)
+  try{
+    const bosEntries=await loadAllBosData();
+    result.bos=bosEntries;
+  }catch(e){result.bos=[];}
+
   papersCache = result;
   return result;
 }
@@ -1960,6 +2249,7 @@ function renderPapers(){
     ...data.local,
     ...data.thsc,
     ...data.hsc,
+    ...(data.bos||[]),
   ];
 
   // Filter
@@ -1976,8 +2266,8 @@ function renderPapers(){
       const haystack = (p.title+' '+(p.subject||'')+' '+(p.topics||[]).join(' ')+' '+(p.year||'')+' '+(p.type||'')).toLowerCase();
       if(!haystack.includes(q)) return false;
     }
-    // Default: hide supplementary docs unless explicitly filtering for them or searching
-    if(!S.papersSearch && S.papersTypeFilter==='All' && p.type && p.type!=='HSC Paper' && p.source!=='mine') return false;
+    // Default: hide THSC supplementary docs (marking guides etc.) unless explicitly filtering or searching
+    if(!S.papersSearch && S.papersTypeFilter==='All' && (p.source==='thsconline'||p.source==='HSC Official') && p.type && p.type!=='HSC Paper') return false;
     return true;
   });
 
@@ -2002,13 +2292,15 @@ function renderPapers(){
     const c = p.color!==undefined ? getSubjColor({color:p.color}) : {bg:'var(--srf2)',tx:'var(--tx3)',bd:'var(--bd)'};
     const srcBadge = p.source==='mine'
       ? `<div class="paper-src-badge badge-mine">Mine</div>`
+      : p.source==='boredofstudies'
+      ? `<div class="paper-src-badge badge-bos">BoS</div>`
       : p.source==='thsconline'
       ? `<div class="paper-src-badge badge-thsc">thsc</div>`
       : `<div class="paper-src-badge badge-hsc">HSC</div>`;
     const solDot = p.hasSolutions ? `<div class="paper-sol-dot" title="Solutions available"></div>` : '';
     const topicTags = (p.topics||[]).slice(0,4).map(t=>`<span class="paper-topic-tag">${t}</span>`).join('');
 
-    return`<div class="paper-card" data-action="open-paper" data-url="${p.url}" data-title="${p.title.replace(/"/g,'&quot;')}" data-id="${p.id}">
+    return`<div class="paper-card" data-action="${p.external?'open-paper-ext':'open-paper'}" data-url="${p.url}" data-title="${p.title.replace(/"/g,'&quot;')}" data-id="${p.id}">
       <div class="paper-thumb" id="thumb-${p.id}">
         ${p.source==='mine'
           ? `<canvas id="canvas-${p.id}" data-pdf-url="${p.url}"></canvas>`
@@ -2016,7 +2308,7 @@ function renderPapers(){
               <div class="ptp-subject" style="background:${c.bg};color:${c.tx};border:1px solid ${c.bd};">${p.subject||'HSC'}</div>
               <div class="ptp-year">${p.year||''}</div>
               <div class="ptp-type">${p.type||'Paper'}</div>
-              <div class="ptp-icon">📄</div>
+              <div class="ptp-icon">${p.external?'↗':'📄'}</div>
             </div>`
         }
         ${srcBadge}
@@ -2076,6 +2368,7 @@ function renderPapers(){
         ${chipFilter('My Papers','mine','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='mine').length)}
         ${chipFilter('thsconline','thsconline','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='thsconline').length)}
         ${chipFilter('HSC Official','HSC Official','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='HSC Official').length)}
+        ${chipFilter('BoredOfStudies','boredofstudies','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='boredofstudies').length)}
       </div>
     </div>
   </div>
@@ -2327,15 +2620,18 @@ function renderLeaderboard(){
     <div class="lb-list">
       ${sorted.map((r,i)=>{
         const isMe=r.userId===myId;
+        const myName=(S.data?.name||'').trim().toLowerCase();
+        const isDupe=!isMe&&myName&&(r.name||'').trim().toLowerCase()===myName;
         return`<div class="lb-row${isMe?' lb-me':''}"${isMe?'':` data-action="lb-pick-rival" data-uid="${r.userId}"`}>
           <div class="lb-rank">${medal(i)||'<span class="lb-rank-num">'+(i+1)+'</span>'}</div>
           <div class="lb-info">
-            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
+            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you" style="color:var(--err);background:rgba(184,50,40,.08);">dupe</span>':''}</div>
             <div class="lb-sub">${secondaryInfo(r,sortKey)}</div>
           </div>
           <div class="lb-stat">
             <div class="lb-stat-val">${fmtLbVal(r,sortKey)}</div>
-            ${!isMe?'<div class="lb-challenge-sm">⚔️</div>':''}
+            ${isDupe?`<div class="lb-del-dupe" data-action="lb-del-entry" data-uid="${r.userId}" title="Delete duplicate">✕</div>`:''}
+            ${!isMe&&!isDupe?'<div class="lb-challenge-sm">⚔️</div>':''}
           </div>
         </div>`;
       }).join('')}
@@ -2843,6 +3139,17 @@ const A={
     S.lbLoading=true;render();
     lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;render();showToast('Leaderboard updated','🏆');});
   },
+  'lb-del-entry':async(btn)=>{
+    const uid=btn.dataset.uid;if(!uid)return;
+    if(!confirm('Delete this duplicate entry from the leaderboard?'))return;
+    try{
+      const db=await getFirestoreDb();if(!db)return;
+      const{doc,deleteDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+      await deleteDoc(doc(db,'leaderboard',uid));
+      S.lbData=(S.lbData||[]).filter(r=>r.userId!==uid);
+      render();showToast('Duplicate removed','✕');
+    }catch(e){showToast('Failed to delete','!');}
+  },
 
   'tt-tab':(btn)=>{S.ttTab=parseInt(btn.dataset.tab);render();},
 
@@ -2924,6 +3231,15 @@ const A={
       `${fmtDur(dur)} closer to 99.95.`
     ];
     render();flashGreen();showToast(msgs[Math.floor(Math.random()*msgs.length)]);
+    // Retrieval practice nudge — after every ~3rd session, prompt recall
+    const sessCount=S.data.sessions.filter(s=>s.subject!=='grace').length;
+    if(sessCount%3===0&&sess.topic){
+      setTimeout(()=>showToast(`Quick recall: Can you name 3 key things from ${sess.topic}? Just thinking about it boosts retention.`,'🧠'),2500);
+    } else {
+      // Variable reward — 25% chance of bonus message
+      const bonus=getVariableReward();
+      if(bonus){setTimeout(()=>showToast(bonus.msg,bonus.type==='challenge'?'🎯':bonus.type==='fact'?'🧠':'✨'),2200);}
+    }
   },
 
   // Auto-login actions
@@ -2963,6 +3279,9 @@ const A={
   'papers-clear-filters':()=>{S.papersSubFilter='All';S.papersYrFilter='All';S.papersTypeFilter='All';S.papersSrcFilter='All';S.papersSearch='';render();setTimeout(renderPaperThumbs,200);},
   'papers-reload':()=>{papersCache=null;S.papersData=null;S.papersLoading=true;render();loadPapersData(true).then(d=>{S.papersData=d;S.papersLoading=false;render();setTimeout(renderPaperThumbs,200);});},
 
+  'open-paper-ext':(btn)=>{
+    window.open(btn.dataset.url,'_blank','noopener');
+  },
   'open-paper':(btn)=>{
     const url=btn.dataset.url;
     let viewUrl=url;

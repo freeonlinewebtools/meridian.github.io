@@ -1,0 +1,65 @@
+[
+  {
+    "file": "2026 ext1 binomial theorem qa.pdf",
+    "title": "Ext 1 Binomial Theorem Q&A (2026)",
+    "subject": "Maths Ext 1",
+    "unit": "Yr 11/12",
+    "year": "2026",
+    "type": "Practice Questions",
+    "topics": ["Binomial Theorem"]
+  },
+  {
+    "file": "AT1 2025 Final- (1).pdf",
+    "title": "Assessment Task 1 (2025)",
+    "subject": "Maths Ext 1",
+    "unit": "Yr 11",
+    "year": "2025",
+    "type": "Assessment",
+    "topics": []
+  },
+  {
+    "file": "Ext1_Combinatorics_Practice_Test_1.pdf",
+    "title": "Ext 1 Combinatorics Practice Test 1",
+    "subject": "Maths Ext 1",
+    "unit": "Yr 11/12",
+    "year": "",
+    "type": "Practice Test",
+    "topics": ["Combinatorics", "Counting Techniques"]
+  },
+  {
+    "file": "MathAdvTest.pdf",
+    "title": "Maths Advanced Test",
+    "subject": "Maths Advanced",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Assessment",
+    "topics": []
+  },
+  {
+    "file": "Year11_MathsAdv_Practice_Exam_Paper2.pdf",
+    "title": "Yr 11 Maths Advanced Practice Exam Paper 2",
+    "subject": "Maths Advanced",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Practice Exam",
+    "topics": []
+  },
+  {
+    "file": "Year11_MathsAdv_Practice_Exam_Paper3.pdf",
+    "title": "Yr 11 Maths Advanced Practice Exam Paper 3",
+    "subject": "Maths Advanced",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Practice Exam",
+    "topics": []
+  },
+  {
+    "file": "Year11_Physics_Practice_Exam.pdf",
+    "title": "Yr 11 Physics Practice Exam",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Practice Exam",
+    "topics": []
+  }
+]
