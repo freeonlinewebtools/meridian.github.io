@@ -378,6 +378,86 @@ async function syncPull(sc){
   }catch{return{ok:false,err:'Network error'};}
 }
 function triggerSync(){clearTimeout(syncDebounce);syncDebounce=setTimeout(async()=>{const sc=loadSync();if(!sc.apiKey)return;sc.status='syncing';saveSync(sc);updateSyncDot();const r=await syncPush(S.data,sc);sc.status=r.ok?'ok':'err';sc.lastSynced=r.ok?Date.now():sc.lastSynced;if(r.binId)sc.binId=r.binId;saveSync(sc);updateSyncDot();},1200);}
+
+/* ════════════════════════════════
+   FIRESTORE LEADERBOARD
+════════════════════════════════ */
+let _fbDb=null,_fbInitPromise=null;
+async function getFirestoreDb(){
+  if(_fbDb)return _fbDb;
+  if(!window.FIREBASE_CONFIG)return null;
+  if(_fbInitPromise)return _fbInitPromise;
+  _fbInitPromise=(async()=>{
+    try{
+      const fbApp=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js');
+      const{getFirestore}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+      const{getAuth,signInAnonymously}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js');
+      const app=fbApp.getApps().length?fbApp.getApp():fbApp.initializeApp(window.FIREBASE_CONFIG);
+      const auth=getAuth(app);
+      if(!auth.currentUser){try{await signInAnonymously(auth);}catch(e){console.warn('Anon auth failed:',e);}}
+      _fbDb=getFirestore(app);
+      return _fbDb;
+    }catch(e){console.warn('Firestore init failed:',e);return null;}
+    finally{_fbInitPromise=null;}
+  })();
+  return _fbInitPromise;
+}
+
+function getLbUserId(){
+  let id=localStorage.getItem('mer_lb_uid');
+  if(!id){id=uid();localStorage.setItem('mer_lb_uid',id);}
+  return id;
+}
+
+function buildLbStats(data){
+  if(!data)return null;
+  const sess=data.sessions||[];
+  const tests=data.tests||[];
+  const scoredTests=tests.filter(t=>t.score!=null&&t.outOf>0);
+  const avgScore=scoredTests.length?Math.round(scoredTests.reduce((a,t)=>a+(t.score/t.outOf)*100,0)/scoredTests.length):null;
+  return{
+    name:data.name||'Anonymous',
+    totalMins:totalMins(sess),
+    weekMins:weekMins(sess),
+    streak:getStreak(sess),
+    bestStreak:getBest(sess),
+    sessCount:sess.filter(s=>s.subject!=='grace').length,
+    avgScore,
+    testCount:scoredTests.length,
+    year:data.year||11,
+    lastUpdated:Date.now()
+  };
+}
+
+let _lbPushDebounce=null;
+function triggerLbPush(){
+  clearTimeout(_lbPushDebounce);
+  _lbPushDebounce=setTimeout(()=>lbPush(),2000);
+}
+
+async function lbPush(){
+  if(!S.data||!window.FIREBASE_CONFIG)return;
+  const db=await getFirestoreDb();if(!db)return;
+  const{doc,setDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  const stats=buildLbStats(S.data);if(!stats)return;
+  const userId=getLbUserId();
+  try{await setDoc(doc(db,'leaderboard',userId),{...stats,userId});}catch(e){console.warn('LB push failed:',e);}
+}
+
+async function lbFetchAll(){
+  const db=await getFirestoreDb();if(!db)return[];
+  const{collection,getDocs,query,orderBy}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  try{
+    const snap=await getDocs(query(collection(db,'leaderboard'),orderBy('totalMins','desc')));
+    const rows=[];snap.forEach(d=>rows.push({id:d.id,...d.data()}));return rows;
+  }catch(e){console.warn('LB fetch failed:',e);return[];}
+}
+
+let _lbCache=null,_lbCacheTime=0;
+async function lbGetCached(force){
+  if(!force&&_lbCache&&Date.now()-_lbCacheTime<30000)return _lbCache;
+  _lbCache=await lbFetchAll();_lbCacheTime=Date.now();return _lbCache;
+}
 function updateSyncDot(){const d=document.querySelector('.sync-dot');if(!d)return;const sc=loadSync();if(!sc.apiKey){d.style.display='none';return;}d.style.display='';d.className='sync-dot'+({ok:' ok',err:' err',syncing:' ing'}[sc.status]||'');}
 
 /* ════════════════════════════════
@@ -459,7 +539,7 @@ let S={
   progTab:0,
   showExport:false,
   showPinEntry:false,
-  testSub:null,testScore:'',testOutOf:100,testName:'',testType:'test',testDate:today(),testNextDate:'',
+  testSub:null,testScore:'',testOutOf:100,testName:'',testType:'Test',testDate:today(),testNextDate:'',testNextName:'',editTestId:null,
   regStep:1,regPin1:'',regPin2:'',regYear:11,
   regSubjects:['chem','bio','phys','max','mae','eng'],
   tutStep:0,showOnboardComplete:false,
@@ -474,6 +554,13 @@ let S={
   papersData:null,          // loaded papers cache {local:[], thsc:[], hsc:[]}
   papersLoading:false,
   moreMenu:false,           // mobile "more" menu open
+  // Leaderboard
+  lbTab:0,                   // 0=rankings, 1=head-to-head
+  lbSort:'weekMins',         // weekMins, totalMins, streak, avgScore
+  lbData:null,               // cached leaderboard rows
+  lbLoading:false,
+  lbRival:null,              // selected rival userId for h2h
+  lbH2hMode:'weekMins',     // h2h comparison mode
 };
 
 /* ════════════════════════════════
@@ -598,7 +685,7 @@ function renderLoginForm(){
         <div class="auth-logo-sm">Meri<b>d</b>ian</div>
         <div class="auth-tagline">Your study tracker for the HSC.<br>Track sessions, streaks, and progress.</div>
         <div class="fld"><label class="flbl">PIN</label>
-          <input class="fi" id="li-pin" type="password" inputmode="numeric" maxlength="6" placeholder="Enter your PIN" value="${esc(S.loginPin)}" autocomplete="current-password">
+          <input class="fi" id="li-pin" type="password" inputmode="numeric" maxlength="4" placeholder="4-digit PIN" value="${esc(S.loginPin)}" autocomplete="current-password">
         </div>
         ${S.loginErr?`<div class="aerr">${S.loginErr}</div>`:''}
         <button class="abtn" data-action="login">Enter →</button>
@@ -639,7 +726,7 @@ function renderRegister(){
         <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:24px;line-height:1.5;">This shows on your dashboard greeting and won't be shared with anyone.</div>
         <div class="fld">
           <label class="flbl">First name</label>
-          <input class="fi" id="reg-name" type="text" placeholder="Ames" value="${esc(S.loginName)}" autocomplete="off" autocorrect="off" autocapitalize="words" style="font-size:18px;padding:14px 16px;">
+          <input class="fi" id="reg-name" type="text" placeholder="Name Here" value="${esc(S.loginName)}" autocomplete="off" autocorrect="off" autocapitalize="words" style="font-size:18px;padding:14px 16px;">
         </div>
         ${S.loginErr?`<div class="aerr">${S.loginErr}</div>`:''}
         <button class="abtn" data-action="reg-next" style="margin-top:12px;">Continue →</button>
@@ -661,11 +748,11 @@ function renderRegister(){
       <div class="auth-step-panel">
         <div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);margin-bottom:10px;">Step 2 of 4 — Security</div>
         <div style="font-family:'Cormorant',serif;font-size:28px;font-weight:300;color:var(--tx);margin-bottom:6px;">Create a PIN</div>
-        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:28px;line-height:1.5;">4 digits to unlock Meridian on this device.</div>
+        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:28px;line-height:1.5;">4 digits to unlock Meridian on this device. Your data stays local — use Cloud Sync in Settings to access it elsewhere.</div>
         <div class="pin-row">
           ${[0,1,2,3].map(i=>`<input class="pin-digit" id="pd-${i}" type="password" inputmode="numeric" maxlength="1" placeholder="·" data-idx="${i}">`).join('')}
         </div>
-        <div class="pin-hint">Your data stays on this device — PIN is just a local lock.</div>
+        <div class="pin-hint">PIN is a local lock — it doesn't leave this device.</div>
         ${S.loginErr?`<div class="aerr">${S.loginErr}</div>`:''}
         <button class="abtn" data-action="reg-next">Continue →</button>
       </div>`;
@@ -688,7 +775,7 @@ function renderRegister(){
       <div class="auth-step-panel">
         <div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);margin-bottom:10px;">Step 4 of 4 — Your subjects</div>
         <div style="font-family:'Cormorant',serif;font-size:28px;font-weight:300;color:var(--tx);margin-bottom:6px;">What are you studying?</div>
-        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:18px;line-height:1.5;">Select all your subjects. You can add custom ones later.</div>
+        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:18px;line-height:1.5;">Pick at least one subject. You can add or remove them later in Settings.</div>
         <div class="subj-select-grid" style="max-height:min(320px,50vh);overflow-y:auto;-webkit-overflow-scrolling:touch;">
           ${ALL_PRESET_SUBS.map(sub=>{
             const c = getSubjColor(sub);
@@ -700,7 +787,7 @@ function renderRegister(){
           }).join('')}
         </div>
         ${S.loginErr?`<div class="aerr">${S.loginErr}</div>`:''}
-        <button class="abtn" data-action="reg-finish" style="margin-top:12px;">Create account →</button>
+        <button class="abtn${S.regSubjects.length===0?' disabled':''}" data-action="reg-finish" style="margin-top:12px;"${S.regSubjects.length===0?' disabled':''}>${S.regSubjects.length===0?'Select at least one subject':`Create account (${S.regSubjects.length} subject${S.regSubjects.length!==1?'s':''})`} →</button>
       </div>`;
   }
 
@@ -769,7 +856,7 @@ function renderOnboardComplete(){
    SHELL
 ════════════════════════════════ */
 function renderShell(){
-  const vs={dashboard:renderDash,timetable:renderTimetable,history:renderHistory,progress:renderProgress,stats:renderStats,papers:renderPapers,timer:renderTimer,settings:renderSettings};
+  const vs={dashboard:renderDash,timetable:renderTimetable,history:renderHistory,progress:renderProgress,stats:renderStats,papers:renderPapers,timer:renderTimer,settings:renderSettings,leaderboard:renderLeaderboard};
   const sc=loadSync();
   const hasTT=(S.data?.timetable||[]).length>0;
   const todayClasses=getTodayTT(S.data?.timetable||[]).length;
@@ -784,7 +871,7 @@ function renderShell(){
   </div>
   <div class="wrap">
     <nav class="side dsk">
-      ${[['dashboard','◉','Dashboard'],['timetable','☰','Timetable'],['history','◔','History'],['progress','△','Progress'],['stats','◇','Stats'],['papers','◧','Papers'],['timer','◷','Timer']].map(([v,i,l])=>`
+      ${[['dashboard','◉','Dashboard'],['timetable','☰','Timetable'],['leaderboard','🏆','Leaderboard'],['history','◔','History'],['progress','△','Progress'],['stats','◇','Stats'],['papers','◧','Papers'],['timer','◷','Timer']].map(([v,i,l])=>`
         <div class="si${S.view===v?' on':''}" data-action="nav-${v}"><span class="ico">${i}</span>${l}${v==='timetable'&&hasTT&&todayClasses>0?`<span class="si-badge">${todayClasses}</span>`:''}</div>`).join('')}
       <div class="si-sec">Account</div>
       <div class="si${S.view==='settings'?' on':''}" data-action="nav-settings"><span class="ico">⚙</span>Settings</div>
@@ -801,10 +888,11 @@ function renderShell(){
       <div class="fab" data-action="open-log">＋</div>
     </div>
     <div class="bni${S.view==='papers'?' on':''}" data-action="nav-papers"><span class="bni-ic">◧</span>Papers<div class="bni-dot"></div></div>
-    <div class="bni${['progress','history','stats','timer','settings'].includes(S.view)?' on':''}" data-action="toggle-more"><span class="bni-ic">⋯</span>More<div class="bni-dot"></div></div>
+    <div class="bni${['progress','history','stats','timer','settings','leaderboard'].includes(S.view)?' on':''}" data-action="toggle-more"><span class="bni-ic">⋯</span>More<div class="bni-dot"></div></div>
   </nav>
   ${S.moreMenu?`<div class="more-menu-overlay" data-action="close-more"></div>
   <div class="more-menu">
+    <div class="more-item${S.view==='leaderboard'?' on':''}" data-action="more-nav" data-view="leaderboard"><span class="more-item-ic">🏆</span>Leaderboard</div>
     <div class="more-item${S.view==='progress'?' on':''}" data-action="more-nav" data-view="progress"><span class="more-item-ic">△</span>Progress</div>
     <div class="more-item${S.view==='history'?' on':''}" data-action="more-nav" data-view="history"><span class="more-item-ic">◔</span>History</div>
     <div class="more-item${S.view==='stats'?' on':''}" data-action="more-nav" data-view="stats"><span class="more-item-ic">◇</span>Stats</div>
@@ -1002,18 +1090,18 @@ function renderDash(){
   <div class="today-overview">
     <div class="ov-tile${tMins>=120?' green':''}">
       <div class="ov-lbl">Today</div>
-      <div class="ov-val">${tMins?fmtDur(tMins):'—'}</div>
+      <div class="ov-val">${tMins?fmtDur(tMins):'0m'}</div>
       <div class="ov-sub">${todaySess(sessions).length} session${todaySess(sessions).length!==1?'s':''}</div>
     </div>
     <div class="ov-tile">
       <div class="ov-lbl">This week</div>
-      <div class="ov-val">${wMins?fmtDur(wMins):'—'}</div>
+      <div class="ov-val">${wMins?fmtDur(wMins):'0m'}</div>
       <div class="ov-sub">${Math.round(wMins/60*10)/10}h logged</div>
     </div>
     <div class="ov-tile">
       <div class="ov-lbl">All time</div>
-      <div class="ov-val">${fmtDur(totalMins(sessions))||'—'}</div>
-      <div class="ov-sub">${tSess} sessions</div>
+      <div class="ov-val">${totalMins(sessions)?fmtDur(totalMins(sessions)):'0m'}</div>
+      <div class="ov-sub">${tSess} session${tSess!==1?'s':''}</div>
     </div>
     <div class="ov-tile${dLeft<=30?' accent':''}">
       <div class="ov-lbl">${exam.name}</div>
@@ -1043,9 +1131,9 @@ function renderDash(){
   <div class="sec mb8"><span class="sec-lbl">Schedule</span><span class="sec-link" data-action="nav-timetable">See week →</span></div>
   <div style="font-size:13px;color:var(--tx3);margin-bottom:14px;padding:10px 14px;background:var(--srf);border:1px solid var(--bd);border-radius:var(--rm);">No classes today — ${isWeekend(today())?'enjoy the weekend':'check your schedule'}.</div>`:''}
 
-  <div class="cov-card">
+  <div class="cov-card${done.length===subjects.length?' cov-done':''}">
     <div class="cov-top">
-      <span class="cov-lbl">${done.length===subjects.length?'All subjects covered 🎯':done.length===0?'Tap a subject below to log':`${subjects.length-done.length} subject${subjects.length-done.length!==1?'s':''} left`}</span>
+      <span class="cov-lbl">${done.length===subjects.length?'All subjects covered today 🎯':done.length===0?'Tap a subject below to log':`${subjects.length-done.length} subject${subjects.length-done.length!==1?'s':''} left today`}</span>
       <span class="cov-frac">${done.length}<small>/${subjects.length}</small></span>
     </div>
     <div class="cov-track"><div class="cov-fill${done.length===subjects.length?' done':''}" data-bw="${cvPct}" style="width:0%"></div></div>
@@ -1069,8 +1157,37 @@ function renderDash(){
   </div>
 
   <div class="sec"><span class="sec-lbl">Recent sessions</span><span class="sec-link" data-action="nav-history">All →</span></div>
-  ${recent.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">Nothing logged yet</div><div class="empty-s">Even 15 minutes counts. Tap below to log your first session.</div><div class="empty-action" data-action="open-log">+ Log first session</div></div>`
-  :`<div class="sess-list">${recent.map(renderSessRow).join('')}</div>`}`;
+  ${recent.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">No sessions yet</div><div class="empty-s">Use the timer or press L to log your first session — even 10 minutes counts.</div><div class="empty-action" data-action="open-log">+ Log first session</div></div>`
+  :`<div class="sess-list">${recent.map(renderSessRow).join('')}</div>`}
+
+  ${renderDashLb()}`;
+}
+
+function renderDashLb(){
+  const rows=S.lbData;
+  if(!rows||!rows.length||!window.FIREBASE_CONFIG)return'';
+  const myId=getLbUserId();
+  const sorted=[...rows].sort((a,b)=>(b.weekMins||0)-(a.weekMins||0));
+  const top3=sorted.slice(0,3);
+  const myRank=sorted.findIndex(r=>r.userId===myId);
+  const medals=['🥇','🥈','🥉'];
+  return`
+  <div class="sec" style="margin-top:4px;"><span class="sec-lbl">Leaderboard</span><span class="sec-link" data-action="nav-leaderboard">Full board →</span></div>
+  <div class="dash-lb">
+    ${top3.map((r,i)=>{
+      const isMe=r.userId===myId;
+      return`<div class="dash-lb-row${isMe?' dash-lb-me':''}" data-action="nav-leaderboard">
+        <span class="dash-lb-medal">${medals[i]}</span>
+        <span class="dash-lb-name">${esc(r.name)}${isMe?' (you)':''}</span>
+        <span class="dash-lb-val">${fmtDur(r.weekMins||0)}</span>
+      </div>`;
+    }).join('')}
+    ${myRank>2?`<div class="dash-lb-row dash-lb-me" data-action="nav-leaderboard">
+      <span class="dash-lb-medal" style="font-size:11px;">#${myRank+1}</span>
+      <span class="dash-lb-name">${esc(S.data?.name||'You')} (you)</span>
+      <span class="dash-lb-val">${fmtDur(sorted[myRank]?.weekMins||0)}</span>
+    </div>`:''}
+  </div>`;
 }
 
 /* ════════════════════════════════
@@ -1659,7 +1776,10 @@ function renderProgress(){
               <div class="test-meta">${fmtDate(t.date)} · ${t.type}</div>
             </div>
             <div class="test-raw">${t.score}/${t.outOf}</div>
-            <div class="del-btn" data-action="del-test" data-id="${t.id}">✕</div>
+            <div class="test-actions">
+              <div class="edit-btn" data-action="edit-test" data-id="${t.id}" title="Edit">✎</div>
+              <div class="del-btn" data-action="del-test" data-id="${t.id}" title="Delete">✕</div>
+            </div>
           </div>`;
         }).join('')}
 
@@ -1685,16 +1805,19 @@ function renderProgress(){
    PAPERS LIBRARY
 ════════════════════════════════ */
 
-// thsconline subject map — codes that matter for Ames's subjects
+// thsconline subject map — codes for HSC subjects
 const THSC_SUBJECTS = [
   {code:'5330', label:'Maths Ext 1', unit:'Yr 11/12', color:3},
   {code:'5340', label:'Maths Ext 2', unit:'Yr 12', color:3},
   {code:'5320', label:'Maths Advanced', unit:'Yr 11/12', color:4},
   {code:'1370', label:'Biology', unit:'Yr 11/12', color:1},
   {code:'6520', label:'Physics', unit:'Yr 11/12', color:2},
+  {code:'1480', label:'Chemistry', unit:'Yr 11/12', color:0},
+  {code:'2650', label:'Engineering Studies', unit:'Yr 11/12', color:6},
+  {code:'2250', label:'English Advanced', unit:'Yr 11/12', color:5},
 ];
 
-// HSCpapers.json course names to match Ames's subjects
+// HSCpapers.json course names to match subjects
 const HSC_COURSE_MAP = {
   'Chemistry':'Chemistry',
   'Biology':'Biology',
@@ -1715,9 +1838,8 @@ async function loadPapersData(force=false){
 
   // 1. Load local papers/index.json (optional — skip if folder doesn't exist)
   try {
-    const head = await fetch(window.PAPERS_DIR + 'index.json', {method:'HEAD'});
-    if(head.ok){
-      const r = await fetch(window.PAPERS_DIR + 'index.json', {cache:'no-cache'});
+    const r = await fetch(window.PAPERS_DIR + 'index.json', {cache:'no-cache'});
+    if(r.ok){
       const items = await r.json();
       result.local = items.map(p=>({
         ...p,
@@ -1742,7 +1864,13 @@ async function loadPapersData(force=false){
         // Parse year from key like "2023 HSC"
         const yearMatch = key.match(/\d{4}/);
         const year = yearMatch ? yearMatch[0] : '';
-        const isMarkingScheme = key.toLowerCase().includes('marking') || key.toLowerCase().includes('solution');
+        const kl = key.toLowerCase();
+        let docType = 'HSC Paper';
+        if(kl.includes('sample answer')) docType = 'Sample Answers';
+        else if(kl.includes('solution')) docType = 'Solutions';
+        else if(kl.includes('marking feedback') || kl.includes('marking feed')) docType = 'Marking Feedback';
+        else if(kl.includes('marking')) docType = 'Marking Guidelines';
+        const isSup = docType !== 'HSC Paper';
         entries.push({
           id: `thsc-${s.code}-${key}`,
           title: val.title || key,
@@ -1751,8 +1879,8 @@ async function loadPapersData(force=false){
           unit: s.unit,
           source: 'thsconline',
           year,
-          type: isMarkingScheme ? 'Marking Scheme' : 'HSC Paper',
-          hasSolutions: isMarkingScheme,
+          type: docType,
+          hasSolutions: isSup,
           color: s.color,
         });
       }
@@ -1776,7 +1904,13 @@ async function loadPapersData(force=false){
         for(const pack of (course.packs||[])){
           for(const doc of (pack.docs||[])){
             if(!doc.doc_link) continue;
-            const isMS = doc.doc_name.toLowerCase().includes('marking') || doc.doc_name.toLowerCase().includes('solution') || doc.doc_name.toLowerCase().includes('notes');
+            const dl = doc.doc_name.toLowerCase();
+            let hscType = 'HSC Paper';
+            if(dl.includes('sample answer') || dl.includes('sample writing')) hscType = 'Sample Answers';
+            else if(dl.includes('solution')) hscType = 'Solutions';
+            else if(dl.includes('notes from')) hscType = 'Marking Feedback';
+            else if(dl.includes('marking')) hscType = 'Marking Guidelines';
+            const isSup2 = hscType !== 'HSC Paper';
             result.hsc.push({
               id: `hsc-${course.course_name}-${pack.year}-${doc.doc_name}`,
               title: `${course.course_name} ${pack.year} — ${doc.doc_name}`,
@@ -1785,8 +1919,8 @@ async function loadPapersData(force=false){
               unit: 'Yr 12',
               source: alreadyCovered ? 'thsconline' : 'HSC Official',
               year: pack.year,
-              type: isMS ? 'Marking Scheme' : 'HSC Paper',
-              hasSolutions: isMS,
+              type: hscType,
+              hasSolutions: isSup2,
               color: colorIdx,
             });
           }
@@ -1832,18 +1966,18 @@ function renderPapers(){
   let filtered = all.filter(p=>{
     if(S.papersSubFilter !== 'All' && p.subject !== S.papersSubFilter) return false;
     if(S.papersYrFilter !== 'All'){
-      const yr = S.papersYrFilter; // 'Yr 11' or 'Yr 12'
-      if(p.unit && !p.unit.includes(yr.replace('Yr ',''))) return false;
+      if(S.papersYrFilter === 'Yr 11' && p.unit && !p.unit.includes('11')) return false;
+      if(S.papersYrFilter === 'Yr 12' && p.unit && !p.unit.includes('12')) return false;
     }
     if(S.papersSrcFilter !== 'All' && p.source !== S.papersSrcFilter) return false;
     if(S.papersTypeFilter !== 'All' && (p.type||'Paper') !== S.papersTypeFilter) return false;
     if(S.papersSearch){
       const q = S.papersSearch.toLowerCase();
-      const haystack = (p.title+' '+(p.subject||'')+' '+(p.topics||[]).join(' ')+' '+(p.year||'')).toLowerCase();
+      const haystack = (p.title+' '+(p.subject||'')+' '+(p.topics||[]).join(' ')+' '+(p.year||'')+' '+(p.type||'')).toLowerCase();
       if(!haystack.includes(q)) return false;
     }
-    // Default: hide marking schemes unless explicitly searching
-    if(!S.papersSearch && (p.type==='Marking Scheme')) return false;
+    // Default: hide supplementary docs unless explicitly filtering for them or searching
+    if(!S.papersSearch && S.papersTypeFilter==='All' && p.type && p.type!=='HSC Paper' && p.source!=='mine') return false;
     return true;
   });
 
@@ -1852,35 +1986,24 @@ function renderPapers(){
   else if(S.papersSort==='title') filtered.sort((a,b)=>a.title.localeCompare(b.title));
   else filtered.sort((a,b)=>(b.year||'0').localeCompare(a.year||'0')); // newest first
 
-  // Subject options from data
+  // Unique values for chip filters
   const allSubjects = [...new Set(all.map(p=>p.subject).filter(Boolean))].sort();
-
-  // Filter dropdowns
-  const subjectOpts = ['All',...allSubjects].map(s=>
-    `<option value="${s}"${S.papersSubFilter===s?' selected':''}>${s}</option>`
-  ).join('');
-
-  const srcOpts = ['All','mine','thsconline','HSC Official'].map(s=>
-    `<option value="${s}"${S.papersSrcFilter===s?' selected':''}>${s==='All'?'All sources':s==='mine'?'My Papers':s==='thsconline'?'thsconline':'HSC Official'}</option>`
-  ).join('');
-
-  const yrOpts = ['All','Yr 11','Yr 12'].map(y=>
-    `<option value="${y}"${S.papersYrFilter===y?' selected':''}>${y==='All'?'All years':y}</option>`
-  ).join('');
-
   const allTypes = [...new Set(all.map(p=>p.type||'Paper').filter(Boolean))].sort();
-  const typeOpts = ['All',...allTypes].map(t=>
-    `<option value="${t}"${S.papersTypeFilter===t?' selected':''}>${t==='All'?'All types':t}</option>`
-  ).join('');
 
+  // Count papers per year level
+  const yr11Count = all.filter(p=>p.unit&&p.unit.includes('11')).length;
+  const yr12Count = all.filter(p=>p.unit&&p.unit.includes('12')).length;
 
+  function chipFilter(label, val, action, currentVal, count){
+    return`<div class="filter-chip${currentVal===val?' on':''}" data-action="${action}" data-val="${val}">${label}${count!=null?' <span class="fc-count">'+count+'</span>':''}</div>`;
+  }
 
   const cards = filtered.map(p=>{
     const c = p.color!==undefined ? getSubjColor({color:p.color}) : {bg:'var(--srf2)',tx:'var(--tx3)',bd:'var(--bd)'};
     const srcBadge = p.source==='mine'
       ? `<div class="paper-src-badge badge-mine">Mine</div>`
       : p.source==='thsconline'
-      ? `<div class="paper-src-badge badge-thsc">thsconline</div>`
+      ? `<div class="paper-src-badge badge-thsc">thsc</div>`
       : `<div class="paper-src-badge badge-hsc">HSC</div>`;
     const solDot = p.hasSolutions ? `<div class="paper-sol-dot" title="Solutions available"></div>` : '';
     const topicTags = (p.topics||[]).slice(0,4).map(t=>`<span class="paper-topic-tag">${t}</span>`).join('');
@@ -1904,28 +2027,61 @@ function renderPapers(){
         <div class="paper-meta">
           ${p.unit?`<span class="pm-tag" style="background:${c.bg};color:${c.tx};border-color:${c.bd};">${p.unit}</span>`:''}
           ${p.year?`<span class="pm-tag" style="background:var(--srf2);color:var(--tx3);border-color:var(--bd);">${p.year}</span>`:''}
+          ${p.type&&p.type!=='HSC Paper'?`<span class="pm-tag" style="background:var(--srf2);color:var(--tx3);border-color:var(--bd);">${p.type}</span>`:''}
         </div>
         ${topicTags?`<div class="paper-topics">${topicTags}</div>`:''}
       </div>
     </div>`;
   }).join('');
 
+  // Active filter count for clear button
+  const activeFilters = [S.papersSubFilter!=='All',S.papersYrFilter!=='All',S.papersTypeFilter!=='All',S.papersSrcFilter!=='All',!!S.papersSearch].filter(Boolean).length;
+
   return`
   <div class="pg-title">Papers</div>
   <div class="papers-bar">
     <div class="papers-search">
       <span class="papers-search-icon">🔍</span>
-      <input id="papers-search-inp" type="search" placeholder="Search papers, topics, year…" value="${S.papersSearch}" data-action="papers-search">
-    </div>
-    <div class="filter-row">
-      <select class="papers-filter-dd" id="pf-subject">${subjectOpts}</select>
-      <select class="papers-filter-dd" id="pf-year">${yrOpts}</select>
-      <select class="papers-filter-dd" id="pf-type">${typeOpts}</select>
-      <select class="papers-filter-dd" id="pf-source">${srcOpts}</select>
+      <input id="papers-search-inp" type="search" placeholder="Search by name, subject, year, type…" value="${S.papersSearch}" data-action="papers-search">
     </div>
   </div>
+
+  <div class="papers-filter-section">
+    <div class="pf-group">
+      <div class="pf-label">Year level</div>
+      <div class="pf-chips">
+        ${chipFilter('All','All','papers-filter-yr',S.papersYrFilter,null)}
+        ${chipFilter('Yr 11','Yr 11','papers-filter-yr',S.papersYrFilter,yr11Count)}
+        ${chipFilter('Yr 12','Yr 12','papers-filter-yr',S.papersYrFilter,yr12Count)}
+      </div>
+    </div>
+    <div class="pf-group">
+      <div class="pf-label">Subject</div>
+      <div class="pf-chips pf-chips-scroll">
+        ${chipFilter('All','All','papers-filter-sub',S.papersSubFilter,null)}
+        ${allSubjects.map(s=>chipFilter(s,s,'papers-filter-sub',S.papersSubFilter,all.filter(p=>p.subject===s).length)).join('')}
+      </div>
+    </div>
+    <div class="pf-group">
+      <div class="pf-label">Type</div>
+      <div class="pf-chips">
+        ${chipFilter('All','All','papers-filter-type',S.papersTypeFilter,null)}
+        ${allTypes.map(t=>chipFilter(t,t,'papers-filter-type',S.papersTypeFilter,all.filter(p=>(p.type||'Paper')===t).length)).join('')}
+      </div>
+    </div>
+    <div class="pf-group">
+      <div class="pf-label">Source</div>
+      <div class="pf-chips">
+        ${chipFilter('All','All','papers-filter-src',S.papersSrcFilter,null)}
+        ${chipFilter('My Papers','mine','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='mine').length)}
+        ${chipFilter('thsconline','thsconline','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='thsconline').length)}
+        ${chipFilter('HSC Official','HSC Official','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='HSC Official').length)}
+      </div>
+    </div>
+  </div>
+
   <div class="papers-sort-row">
-    <span class="papers-count">${filtered.length} paper${filtered.length!==1?'s':''}</span>
+    <span class="papers-count">${filtered.length} paper${filtered.length!==1?'s':''}${activeFilters?` <span class="papers-clear-filters" data-action="papers-clear-filters">Clear filters</span>`:''}</span>
     <div class="sort-chips">
       ${['date','subject','title'].map(s=>`<div class="filter-chip${S.papersSort===s?' on':''}" data-action="papers-sort-chip" data-val="${s}">${s==='date'?'Newest':s==='subject'?'Subject':'Title'}</div>`).join('')}
     </div>
@@ -2079,6 +2235,12 @@ function renderSettings(){
       <li>Enable the GitHub provider in Firebase</li>
       </ol>
       <div style="margin-top:6px;color:var(--ok);">✓ Both providers are free. Works on GitHub Pages with zero server.</div>
+      <div style="margin-top:10px;"><strong style="color:var(--tx);">3. Enable Leaderboard (Firestore):</strong></div>
+      <ol style="padding-left:16px;margin-top:4px;">
+      <li>In your Firebase project → Build → Firestore Database</li>
+      <li>Click "Create database" → Start in <strong>test mode</strong> → Done</li>
+      <li>That's it — leaderboard will auto-sync when you log sessions</li>
+      </ol>
     </div>
   </div>
   <div class="sset">
@@ -2102,6 +2264,192 @@ function renderSettings(){
   <div class="sset">
     <div class="sset-t">⚠ Danger</div>
     <button class="dbtn" data-action="logout">Log out & clear data</button>
+  </div>`;
+}
+
+/* ════════════════════════════════
+   LEADERBOARD
+════════════════════════════════ */
+function renderLeaderboard(){
+  if(!window.FIREBASE_CONFIG)return`
+    <div class="pg-title">Leaderboard</div>
+    <div style="text-align:center;padding:60px 20px;color:var(--tx3);">
+      <div style="font-size:32px;margin-bottom:12px;">🏆</div>
+      <div style="font-size:14px;font-weight:500;color:var(--tx);margin-bottom:6px;">Firebase not configured</div>
+      <div style="font-size:13px;">Set up Firebase in <span style="color:var(--acc);cursor:pointer;" data-action="nav-settings">Settings</span> to enable the leaderboard.</div>
+    </div>`;
+
+  const myId=getLbUserId();
+  const rows=S.lbData||[];
+  const sortKey=S.lbSort;
+  const sorted=[...rows].sort((a,b)=>{
+    if(sortKey==='avgScore')return(b.avgScore||0)-(a.avgScore||0);
+    return(b[sortKey]||0)-(a[sortKey]||0);
+  });
+
+  const sortLabel={weekMins:'This week',totalMins:'All-time',streak:'Streak',avgScore:'Test avg'};
+
+  function fmtLbVal(row,key){
+    if(key==='weekMins'||key==='totalMins')return fmtDur(row[key]||0);
+    if(key==='streak')return(row[key]||0)+' day'+(row[key]===1?'':'s');
+    if(key==='avgScore')return row[key]!=null?row[key]+'%':'—';
+    return row[key]||'—';
+  }
+
+  function secondaryInfo(r,key){
+    // Show a secondary stat that isn't the primary sort
+    if(key==='weekMins') return`${r.streak||0}🔥 · Yr ${r.year||'?'}`;
+    if(key==='totalMins') return`${r.sessCount||0} sessions · Yr ${r.year||'?'}`;
+    if(key==='streak') return`${fmtDur(r.weekMins||0)} this week`;
+    if(key==='avgScore') return`${r.testCount||0} test${r.testCount===1?'':'s'} · Yr ${r.year||'?'}`;
+    return`Yr ${r.year||'?'}`;
+  }
+
+  function medal(i){return i===0?'🥇':i===1?'🥈':i===2?'🥉':'';}
+
+  // ── Rankings tab ──
+  function renderRankings(){
+    if(S.lbLoading)return`<div class="lb-loading"><div class="lb-spinner"></div><div style="margin-top:12px;">Loading leaderboard…</div></div>`;
+    if(!rows.length)return`<div class="lb-empty">
+      <div style="font-size:36px;margin-bottom:10px;">🏆</div>
+      <div style="font-size:14px;font-weight:500;color:var(--tx);margin-bottom:4px;">No one on the board yet</div>
+      <div style="font-size:13px;">Log a study session and you'll appear here!</div>
+    </div>`;
+
+    // Find my rank
+    const myRank=sorted.findIndex(r=>r.userId===myId);
+
+    return`
+    <div class="lb-sort-bar">
+      ${Object.keys(sortLabel).map(k=>`<div class="lb-sort-chip${sortKey===k?' on':''}" data-action="lb-sort" data-key="${k}">${sortLabel[k]}</div>`).join('')}
+    </div>
+    ${myRank>=0?`<div class="lb-my-rank">You're <strong>#${myRank+1}</strong> of ${sorted.length} · ${fmtLbVal(sorted[myRank],sortKey)}</div>`:''}
+    <div class="lb-list">
+      ${sorted.map((r,i)=>{
+        const isMe=r.userId===myId;
+        return`<div class="lb-row${isMe?' lb-me':''}"${isMe?'':` data-action="lb-pick-rival" data-uid="${r.userId}"`}>
+          <div class="lb-rank">${medal(i)||'<span class="lb-rank-num">'+(i+1)+'</span>'}</div>
+          <div class="lb-info">
+            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
+            <div class="lb-sub">${secondaryInfo(r,sortKey)}</div>
+          </div>
+          <div class="lb-stat">
+            <div class="lb-stat-val">${fmtLbVal(r,sortKey)}</div>
+            ${!isMe?'<div class="lb-challenge-sm">⚔️</div>':''}
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // ── Head-to-head tab ──
+  function renderH2H(){
+    const others=rows.filter(r=>r.userId!==myId);
+
+    if(!S.lbRival){
+      if(S.lbLoading)return`<div class="lb-loading"><div class="lb-spinner"></div><div style="margin-top:12px;">Loading…</div></div>`;
+      if(!others.length)return`<div class="lb-empty">
+        <div style="font-size:36px;margin-bottom:10px;">⚔️</div>
+        <div style="font-size:14px;font-weight:500;color:var(--tx);margin-bottom:4px;">No rivals yet</div>
+        <div style="font-size:13px;">Share Meridian with friends to compete!</div>
+      </div>`;
+      return`
+      <div class="lb-h2h-pick">
+        <div class="lb-h2h-title">Choose your rival</div>
+        <div class="lb-list">
+          ${others.map(r=>`<div class="lb-row lb-rival-pick" data-action="lb-pick-rival" data-uid="${r.userId}">
+            <div class="lb-info">
+              <div class="lb-name">${esc(r.name)}</div>
+              <div class="lb-sub">Yr ${r.year||'?'} · ${fmtDur(r.totalMins||0)} total · ${r.streak||0}🔥</div>
+            </div>
+            <div class="lb-challenge">Challenge →</div>
+          </div>`).join('')}
+        </div>
+      </div>`;
+    }
+
+    // Show comparison
+    const me=rows.find(r=>r.userId===myId)||buildLbStats(S.data);
+    const rival=rows.find(r=>r.userId===S.lbRival);
+    if(!rival){S.lbRival=null;return renderH2H();}
+
+    const modes=[['weekMins','Weekly study'],['totalMins','All-time'],['streak','Streak'],['avgScore','Test avg']];
+
+    function makeBar(mv2,rv2){
+      const total=(mv2||0)+(rv2||0);
+      const mePct=total?Math.round(((mv2||0)/total)*100):50;
+      return`<div class="h2h-bar"><div class="h2h-bar-me" style="width:${mePct}%"></div></div>`;
+    }
+
+    function getMyVal(key){
+      if(!me)return 0;
+      return me[key]||0;
+    }
+
+    // Count wins
+    let myWins=0,rivalWins=0;
+    modes.forEach(([key])=>{
+      const mv=getMyVal(key),rv=rival[key]||0;
+      if(mv>rv)myWins++;else if(rv>mv)rivalWins++;
+    });
+
+    return`
+    <div class="h2h-header">
+      <button class="h2h-back" data-action="lb-clear-rival">← Back</button>
+      <div class="h2h-score-pill">
+        <span class="h2h-score-me">${myWins}</span>
+        <span class="h2h-score-sep">–</span>
+        <span class="h2h-score-rival">${rivalWins}</span>
+      </div>
+    </div>
+    <div class="h2h-vs">
+      <div class="h2h-player h2h-left">
+        <div class="h2h-avatar">${esc((me?.name||'You')[0])}</div>
+        <div class="h2h-pname">${esc(me?.name||'You')}</div>
+      </div>
+      <div class="h2h-versus">VS</div>
+      <div class="h2h-player h2h-right">
+        <div class="h2h-avatar h2h-rival-av">${esc((rival.name||'?')[0])}</div>
+        <div class="h2h-pname">${esc(rival.name||'Rival')}</div>
+      </div>
+    </div>
+    <div class="h2h-mode-bar">
+      ${modes.map(([k,l])=>`<div class="lb-sort-chip${S.lbH2hMode===k?' on':''}" data-action="lb-h2h-mode" data-key="${k}">${l}</div>`).join('')}
+    </div>
+    <div class="h2h-comparison">
+      ${modes.map(([key,label])=>{
+        const mv=getMyVal(key),rv=rival[key]||0;
+        const winner=mv>rv?'me':rv>mv?'rival':'tie';
+        return`<div class="h2h-row${S.lbH2hMode===key?' h2h-active':''}">
+          <div class="h2h-label">${label}${winner==='me'?' ✓':winner==='rival'?' ✗':''}</div>
+          <div class="h2h-vals">
+            <span class="h2h-v ${winner==='me'?'h2h-win':''}">${fmtLbVal({[key]:mv},key)}</span>
+            ${makeBar(mv,rv)}
+            <span class="h2h-v ${winner==='rival'?'h2h-win':''}">${fmtLbVal({[key]:rv},key)}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>
+    <div class="h2h-verdict">
+      ${(()=>{
+        if(myWins>rivalWins)return`<span class="h2h-win-msg">You're winning ${myWins}–${rivalWins}! Keep it up 💪</span>`;
+        if(rivalWins>myWins)return`<span class="h2h-lose-msg">${esc(rival.name)} leads ${rivalWins}–${myWins} — time to grind 🔥</span>`;
+        return'<span class="h2h-tie-msg">All square — who breaks away first?</span>';
+      })()}
+    </div>`;
+  }
+
+  return`
+  <div class="pg-title">Leaderboard</div>
+  <div class="lb-tabs">
+    <div class="lb-tab${S.lbTab===0?' on':''}" data-action="lb-tab" data-tab="0">🏆 Rankings</div>
+    <div class="lb-tab${S.lbTab===1?' on':''}" data-action="lb-tab" data-tab="1">⚔️ Head-to-Head</div>
+  </div>
+  <div class="lb-content">
+    ${S.lbTab===0?renderRankings():renderH2H()}
+  </div>
+  <div class="lb-footer">
+    <button class="cpbtn" data-action="lb-refresh" style="width:100%;">↻ Refresh</button>
   </div>`;
 }
 
@@ -2152,18 +2500,21 @@ function renderModal(){
 
 function renderLogTestModal(){
   const{subjects}=S.data;
-  const score=parseInt(S.testScore)||0;
-  const outOf=parseInt(S.testOutOf)||100;
+  const score=parseFloat(S.testScore)||0;
+  const outOf=parseFloat(S.testOutOf)||100;
   const pct=outOf>0&&score>0?Math.round(score/outOf*100):null;
   const grade=pct?getTestGrade(pct):{letter:'—',color:'var(--tx3)'};
   const TEST_TYPES=['Quiz','Test','Assessment','Exam','Assignment','Trial'];
+  const selSub=subjects.find(s=>s.id===S.testSub);
+  const canSubmit=S.testSub&&score>0;
+  const isEdit=!!S.editTestId;
   return`<div class="overlay" data-action="close-modal-out">
     <div class="modal">
       <div class="modal-header">
         <div class="mhandle" data-action="close-modal"></div>
         <div class="modal-close-x" data-action="close-modal">✕</div>
-        <div class="mtitle">Log test score</div>
-        <div class="msub">Record a result. Meridian will use it to predict your next score.</div>
+        <div class="mtitle">${isEdit?'Edit test score':'Log test score'}</div>
+        <div class="msub">${isEdit?'Update your result.':'Record a result to track progress and predict future scores.'}</div>
       </div>
       <div class="modal-body">
         <div class="mlbl">Subject</div>
@@ -2174,8 +2525,16 @@ function renderLogTestModal(){
           </div>`;}).join('')}
         </div>
 
-        <div class="mlbl">Test name</div>
-        <input class="minp" id="test-name" type="text" placeholder="e.g. Term 2 Assessment Task" value="${S.testName}" maxlength="60">
+        <div class="test-form-row">
+          <div class="test-form-col">
+            <div class="mlbl">Test name</div>
+            <input class="minp" id="test-name" type="text" placeholder="e.g. Term 2 Assessment" value="${S.testName}" maxlength="60">
+          </div>
+          <div class="test-form-col test-form-col-sm">
+            <div class="mlbl">Date</div>
+            <input class="minp" id="test-date" type="date" value="${S.testDate}">
+          </div>
+        </div>
 
         <div class="mlbl">Type</div>
         <div class="test-type-grid">
@@ -2183,27 +2542,32 @@ function renderLogTestModal(){
         </div>
 
         <div class="mlbl">Score</div>
-        <div class="score-input-row">
-          <input type="number" id="test-score" placeholder="72" min="0" value="${S.testScore}" inputmode="decimal">
-          <div class="score-divider">/</div>
-          <input type="number" id="test-outof" placeholder="100" min="1" value="${S.testOutOf}" inputmode="decimal">
+        <div class="score-input-wrap">
+          <div class="score-input-row">
+            <input type="number" id="test-score" placeholder="72" min="0" value="${S.testScore}" inputmode="decimal">
+            <div class="score-divider">/</div>
+            <input type="number" id="test-outof" placeholder="100" min="1" value="${S.testOutOf}" inputmode="decimal">
+          </div>
+          <div class="score-preview" style="${pct?'':'display:none;'}">
+            ${pct?`<div class="score-preview-pct" style="color:${grade.color};">${pct}%</div>
+            <div class="score-preview-grade" style="color:${grade.color};">${grade.letter}</div>`:''}
+          </div>
         </div>
-        ${pct?`<div class="score-preview">
-          <div class="score-preview-pct" style="color:${grade.color};">${pct}%</div>
-          <div class="score-preview-grade" style="color:${grade.color};">${grade.letter}</div>
-        </div>`:''}
 
-        <div class="mlbl">Test date</div>
-        <input class="minp" id="test-date" type="date" value="${S.testDate}">
-
-        <div class="mlbl">Next test date <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional — enables countdown & prediction</span></div>
-        <input class="minp" id="test-next-date" type="date" value="${S.testNextDate}" min="${today()}">
-
-        <div class="mlbl">Next test name <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional</span></div>
-        <input class="minp" id="test-next-name" type="text" placeholder="e.g. Trial HSC" value="" maxlength="60" style="margin-bottom:18px;">
+        <div class="test-next-section">
+          <div class="mlbl" style="margin-bottom:2px;">Next test <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional — enables countdown</span></div>
+          <div class="test-form-row">
+            <div class="test-form-col">
+              <input class="minp" id="test-next-name" type="text" placeholder="e.g. Trial HSC" value="${esc(S.testNextName||'')}" maxlength="60">
+            </div>
+            <div class="test-form-col test-form-col-sm">
+              <input class="minp" id="test-next-date" type="date" value="${S.testNextDate}" min="${today()}">
+            </div>
+          </div>
+        </div>
 
         ${S.logErr?`<div class="merr">${S.logErr}</div>`:''}
-        <button class="log-submit ready" data-action="submit-test">Save Score</button>
+        <button class="log-submit${canSubmit?' ready':''}" data-action="submit-test">${isEdit?(canSubmit&&selSub?`Update ${selSub.name} score`:'Update Score'):(canSubmit&&selSub?`Save ${selSub.name} score`:'Save Score')}</button>
         <div class="mcancel" data-action="close-modal">Cancel</div>
       </div>
     </div>
@@ -2422,7 +2786,7 @@ const A={
     const pin=document.getElementById('li-pin')?.value?.trim();
     const d=loadLocal();
     if(!d){S.loginErr='No account found — create one below.';render();return;}
-    if(d.pin!==pin){S.loginErr='Wrong PIN. Try again.';render();return;}
+    if(d.pin!==pin){S.loginErr='Wrong PIN — check caps lock and try again.';render();return;}
     localStorage.setItem(AUTH_KEY,'1');
     S.data=d;S.view='dashboard';S.loginErr='';S.showPinEntry=false;
     render();startLiveTick();
@@ -2463,6 +2827,22 @@ const A={
   'nav-stats':()=>{S.view='stats';S.modal=null;render();},
   'nav-timer':()=>{S.view='timer';S.modal=null;render();},
   'nav-settings':()=>{S.view='settings';S.modal=null;render();},
+  'nav-leaderboard':()=>{
+    S.view='leaderboard';S.modal=null;S.moreMenu=false;
+    if(!S.lbData&&!S.lbLoading){
+      S.lbLoading=true;render();
+      lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;if(S.view==='leaderboard')render();});
+    } else render();
+  },
+  'lb-tab':(btn)=>{S.lbTab=parseInt(btn.dataset.tab);render();},
+  'lb-sort':(btn)=>{S.lbSort=btn.dataset.key;render();},
+  'lb-pick-rival':(btn)=>{S.lbRival=btn.dataset.uid;S.lbTab=1;render();},
+  'lb-clear-rival':()=>{S.lbRival=null;render();},
+  'lb-h2h-mode':(btn)=>{S.lbH2hMode=btn.dataset.key;render();},
+  'lb-refresh':()=>{
+    S.lbLoading=true;render();
+    lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;render();showToast('Leaderboard updated','🏆');});
+  },
 
   'tt-tab':(btn)=>{S.ttTab=parseInt(btn.dataset.tab);render();},
 
@@ -2533,7 +2913,7 @@ const A={
     const cust=document.getElementById('cust-dur')?.value;
     const dur=cust&&parseInt(cust)>0?parseInt(cust):S.logDur;
     const sess={id:uid(),date:today(),subject:S.logSub,duration:dur,confidence:S.logConf,note,topic:S.logTopic||null,ts:Date.now()};
-    S.data.sessions.push(sess);saveLocal(S.data);triggerSync();
+    S.data.sessions.push(sess);saveLocal(S.data);triggerSync();triggerLbPush();
     S.modal=null;S.logTopic=null;document.body.classList.remove('modal-open');
     const sub=S.data.subjects.find(x=>x.id===S.logSub);
     const topicStr=sess.topic?` · ${sess.topic}`:'';
@@ -2558,7 +2938,7 @@ const A={
 
   'toggle-more':()=>{S.moreMenu=!S.moreMenu;render();},
   'close-more':()=>{S.moreMenu=false;render();},
-  'more-nav':(btn)=>{const v=btn.dataset.view;S.view=v;S.moreMenu=false;S.modal=null;render();if(v==='papers'&&!S.papersData&&!S.papersLoading){S.papersLoading=true;loadPapersData().then(d=>{S.papersData=d;S.papersLoading=false;if(S.view==='papers')render();});}},
+  'more-nav':(btn)=>{const v=btn.dataset.view;S.view=v;S.moreMenu=false;S.modal=null;render();if(v==='papers'&&!S.papersData&&!S.papersLoading){S.papersLoading=true;loadPapersData().then(d=>{S.papersData=d;S.papersLoading=false;if(S.view==='papers')render();});}if(v==='leaderboard'&&!S.lbData&&!S.lbLoading){S.lbLoading=true;render();lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;if(S.view==='leaderboard')render();});}},
   'nav-progress':()=>{S.view='progress';S.modal=null;S.moreMenu=false;render();},
   'prog-tab':(btn)=>{S.progTab=parseInt(btn.dataset.tab);render();},
 
@@ -2580,6 +2960,7 @@ const A={
   'papers-sort-chip':(btn)=>{S.papersSort=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
   'papers-filter-type':(btn)=>{S.papersTypeFilter=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
   'papers-search':()=>{/* handled by input listener */},
+  'papers-clear-filters':()=>{S.papersSubFilter='All';S.papersYrFilter='All';S.papersTypeFilter='All';S.papersSrcFilter='All';S.papersSearch='';render();setTimeout(renderPaperThumbs,200);},
   'papers-reload':()=>{papersCache=null;S.papersData=null;S.papersLoading=true;render();loadPapersData(true).then(d=>{S.papersData=d;S.papersLoading=false;render();setTimeout(renderPaperThumbs,200);});},
 
   'open-paper':(btn)=>{
@@ -2616,10 +2997,19 @@ const A={
 
   // ── Test score actions ──
   'open-log-test':()=>{
-    S.modal='logscore';
+    S.modal='logscore';S.editTestId=null;
     S.testSub=null;S.testScore='';S.testOutOf=100;
     S.testName='';S.testType='Test';S.testDate=today();
-    S.testNextDate='';S.logErr='';
+    S.testNextDate='';S.testNextName='';S.logErr='';
+    document.body.classList.add('modal-open');render();
+  },
+  'edit-test':(btn)=>{
+    const t=(S.data.tests||[]).find(x=>x.id===btn.dataset.id);
+    if(!t)return;
+    S.modal='logscore';S.editTestId=t.id;
+    S.testSub=t.subject;S.testScore=String(t.score);S.testOutOf=t.outOf||100;
+    S.testName=t.name||'';S.testType=t.type||'Test';S.testDate=t.date||today();
+    S.testNextDate=t.nextTestDate||'';S.testNextName=t.nextTestName||'';S.logErr='';
     document.body.classList.add('modal-open');render();
   },
 
@@ -2655,14 +3045,22 @@ const A={
     if(score>outOf){S.logErr='Score can\'t exceed max marks.';let m=document.querySelector('.merr');if(m)m.textContent=S.logErr;return;}
     if(!S.data.tests)S.data.tests=[];
     const pct=Math.round(score/outOf*100);
-    const t={
-      id:uid(),subject:S.testSub,name,score,outOf,date,
-      type:S.testType,ts:Date.now(),
-      nextTestDate:nextDate||null,nextTestName:nextName||null,
-    };
-    S.data.tests.push(t);
-    saveLocal(S.data);triggerSync();
-    S.modal=null;document.body.classList.remove('modal-open');
+    if(S.editTestId){
+      // Update existing test
+      const idx=S.data.tests.findIndex(x=>x.id===S.editTestId);
+      if(idx>=0){
+        S.data.tests[idx]={...S.data.tests[idx],subject:S.testSub,name,score,outOf,date,type:S.testType,nextTestDate:nextDate||null,nextTestName:nextName||null};
+      }
+    } else {
+      const t={
+        id:uid(),subject:S.testSub,name,score,outOf,date,
+        type:S.testType,ts:Date.now(),
+        nextTestDate:nextDate||null,nextTestName:nextName||null,
+      };
+      S.data.tests.push(t);
+    }
+    saveLocal(S.data);triggerSync();triggerLbPush();
+    S.modal=null;S.editTestId=null;document.body.classList.remove('modal-open');
     const sub=S.data.subjects.find(x=>x.id===S.testSub);
     const g=getTestGrade(pct);
     render();
@@ -2692,12 +3090,23 @@ const A={
         const result=await signInWithPopup(auth,provider);
         window._meridianHandleAuthResult(result);
       }catch(popupErr){
+        if(popupErr.code==='auth/unauthorized-domain'){
+          const domain=location.hostname;
+          showToast(`Add ${domain} to Firebase → Auth → Authorized domains`,'!');
+          return;
+        }
         if(popupErr.code==='auth/popup-blocked'||popupErr.code==='auth/cancelled-popup-request'||popupErr.message?.includes('Cross-Origin-Opener-Policy')){
-          await signInWithRedirect(auth,provider);
+          try{await signInWithRedirect(auth,provider);}catch(redirErr){
+            if(redirErr.code==='auth/unauthorized-domain'){showToast(`Add ${location.hostname} to Firebase → Auth → Authorized domains`,'!');return;}
+            throw redirErr;
+          }
         }else throw popupErr;
       }
     }catch(e){
-      showToast(e.code==='auth/popup-closed-by-user'?'Sign-in cancelled.':'Google sign-in failed: '+e.message,'!');
+      if(e.code==='auth/popup-closed-by-user')showToast('Sign-in cancelled.','!');
+      else if(e.code==='auth/unauthorized-domain')showToast(`Add ${location.hostname} to Firebase → Auth → Authorized domains`,'!');
+      else if(e.message?.includes('INTERNAL ASSERTION'))showToast(`Add ${location.hostname} to Firebase → Auth → Authorized domains`,'!');
+      else showToast('Google sign-in failed: '+(e.code||e.message),'!');
     }
   },
 
@@ -2714,12 +3123,22 @@ const A={
         const result=await signInWithPopup(auth,provider);
         window._meridianHandleAuthResult(result,'GitHub');
       }catch(popupErr){
+        if(popupErr.code==='auth/unauthorized-domain'){
+          showToast(`Add ${location.hostname} to Firebase → Auth → Authorized domains`,'!');
+          return;
+        }
         if(popupErr.code==='auth/popup-blocked'||popupErr.code==='auth/cancelled-popup-request'||popupErr.message?.includes('Cross-Origin-Opener-Policy')){
-          await signInWithRedirect(auth,provider);
+          try{await signInWithRedirect(auth,provider);}catch(redirErr){
+            if(redirErr.code==='auth/unauthorized-domain'){showToast(`Add ${location.hostname} to Firebase → Auth → Authorized domains`,'!');return;}
+            throw redirErr;
+          }
         }else throw popupErr;
       }
     }catch(e){
-      showToast(e.code==='auth/popup-closed-by-user'?'Sign-in cancelled.':'GitHub sign-in failed: '+e.message,'!');
+      if(e.code==='auth/popup-closed-by-user')showToast('Sign-in cancelled.','!');
+      else if(e.code==='auth/unauthorized-domain')showToast(`Add ${location.hostname} to Firebase → Auth → Authorized domains`,'!');
+      else if(e.message?.includes('INTERNAL ASSERTION'))showToast(`Add ${location.hostname} to Firebase → Auth → Authorized domains`,'!');
+      else showToast('GitHub sign-in failed: '+(e.code||e.message),'!');
     }
   },
 
@@ -2746,7 +3165,7 @@ const A={
     const name=document.getElementById('sname')?.value?.trim();
     const year=parseInt(document.getElementById('syear')?.value||'11');
     if(!name)return;
-    S.data.name=name;S.data.year=year;saveLocal(S.data);triggerSync();render();showToast('Saved.');
+    S.data.name=name;S.data.year=year;saveLocal(S.data);triggerSync();triggerLbPush();render();showToast('Settings saved.','✓');
   },
 
   'open-add-subj':()=>{S.modal='addsubj';S.newName='';S.newAbbr='';S.newTarget=60;S.logErr='';document.body.classList.add('modal-open');render();},
@@ -3084,7 +3503,7 @@ window._meridianHandleAuthResult=function(result,provider='Google'){
     // else: show auto-auth screen (already handled in renderLogin)
   }
   render();attach();
-  if(S.data)startLiveTick();
+  if(S.data){startLiveTick();lbPush().then(()=>lbGetCached(true)).then(d2=>{if(d2){S.lbData=d2;if(S.view==='dashboard'||S.view==='leaderboard')render();}}).catch(()=>{});}
   // Check for redirect sign-in result
   if(window.FIREBASE_CONFIG){
     try{
