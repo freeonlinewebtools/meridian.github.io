@@ -61,5 +61,95 @@
     "year": "",
     "type": "Practice Exam",
     "topics": []
+  },
+  {
+    "file": "Pearson Physics Module 1 worksheets.pdf",
+    "title": "Pearson Physics Module 1 Worksheets",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Worksheets",
+    "topics": ["Module 1", "Kinematics"]
+  },
+  {
+    "file": "Pearson Physics Module 1 worksheets_rotated (1).pdf",
+    "title": "Pearson Physics Module 1 Worksheets (Rotated)",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Worksheets",
+    "topics": ["Module 1", "Kinematics"]
+  },
+  {
+    "file": "Pearson Physics Module 2 worksheets.pdf",
+    "title": "Pearson Physics Module 2 Worksheets",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Worksheets",
+    "topics": ["Module 2", "Dynamics"]
+  },
+  {
+    "file": "PHYS_Module_1_Worksheets.pdf",
+    "title": "Physics Module 1 Worksheets",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Worksheets",
+    "topics": ["Module 1", "Kinematics"]
+  },
+  {
+    "file": "PHYS_Module_1_PhotoMaster.pdf",
+    "title": "Physics Module 1 PhotoMaster",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Worksheets",
+    "topics": ["Module 1", "Kinematics"]
+  },
+  {
+    "file": "mod 1 iq 1.pdf",
+    "title": "Module 1 Inquiry Question 1",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Practice Questions",
+    "topics": ["Module 1", "Kinematics"]
+  },
+  {
+    "file": "mod 1 iq 2.pdf",
+    "title": "Module 1 Inquiry Question 2",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Practice Questions",
+    "topics": ["Module 1", "Kinematics"]
+  },
+  {
+    "file": "Module 1 Exam Style Questions (short answer) (1).pdf",
+    "title": "Module 1 Exam Style Questions (Short Answer)",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Practice Questions",
+    "topics": ["Module 1", "Kinematics"]
+  },
+  {
+    "file": "Module 2 IQ 1 Exam Style Questions (1).pdf",
+    "title": "Module 2 IQ 1 Exam Style Questions",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Practice Questions",
+    "topics": ["Module 2", "Dynamics"]
+  },
+  {
+    "file": "Newton's Laws of Motion Revision.pdf",
+    "title": "Newton's Laws of Motion Revision",
+    "subject": "Physics",
+    "unit": "Yr 11",
+    "year": "",
+    "type": "Practice Questions",
+    "topics": ["Module 2", "Dynamics", "Newton's Laws"]
   }
 ]
