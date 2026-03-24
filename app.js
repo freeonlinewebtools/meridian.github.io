@@ -623,6 +623,104 @@ async function lbGetCached(force){
   if(!force&&_lbCache&&Date.now()-_lbCacheTime<30000)return _lbCache;
   _lbCache=await lbFetchAll();_lbCacheTime=Date.now();return _lbCache;
 }
+/* ── Teams (Firestore) ── */
+function genTeamCode(){
+  const chars='ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let c='';for(let i=0;i<6;i++)c+=chars[Math.floor(Math.random()*chars.length)];
+  return c;
+}
+
+function saveTeamsList(){localStorage.setItem('mer_teams',JSON.stringify(S.lbTeams));}
+
+async function createTeam(name){
+  const db=await getFirestoreDb();if(!db)return null;
+  const{doc,setDoc,collection:col}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  const userId=getLbUserId();
+  const userName=S.data?.name||'Anonymous';
+  const code=genTeamCode();
+  const teamId=uid();
+  const team={name,code,createdBy:userId,createdAt:Date.now(),members:[{userId,name:userName,joinedAt:Date.now()}]};
+  try{
+    await setDoc(doc(db,'teams',teamId),team);
+    S.lbTeams.push({id:teamId,name,code});saveTeamsList();
+    S.lbTeamData[teamId]={...team};
+    return{id:teamId,...team};
+  }catch(e){console.warn('Create team failed:',e);return null;}
+}
+
+async function joinTeam(code){
+  const db=await getFirestoreDb();if(!db)return{ok:false,msg:'No database'};
+  const{collection:col,getDocs,query,where,doc,updateDoc,arrayUnion}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  const userId=getLbUserId();
+  const userName=S.data?.name||'Anonymous';
+  try{
+    const snap=await getDocs(query(col(db,'teams'),where('code','==',code.toUpperCase())));
+    if(snap.empty)return{ok:false,msg:'No team found with that code'};
+    const teamDoc=snap.docs[0];
+    const team=teamDoc.data();
+    if(team.members.some(m=>m.userId===userId))return{ok:false,msg:'You\'re already in this team'};
+    if((team.members||[]).length>=10)return{ok:false,msg:'This team is full (max 10 members)'};
+    await updateDoc(doc(db,'teams',teamDoc.id),{members:arrayUnion({userId,name:userName,joinedAt:Date.now()})});
+    S.lbTeams.push({id:teamDoc.id,name:team.name,code:team.code});saveTeamsList();
+    team.members.push({userId,name:userName,joinedAt:Date.now()});
+    S.lbTeamData[teamDoc.id]=team;
+    return{ok:true,team:{id:teamDoc.id,...team}};
+  }catch(e){console.warn('Join team failed:',e);return{ok:false,msg:'Failed to join'};}
+}
+
+async function leaveTeam(teamId){
+  const db=await getFirestoreDb();if(!db)return false;
+  const{doc,getDoc,updateDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  const userId=getLbUserId();
+  try{
+    const snap=await getDoc(doc(db,'teams',teamId));
+    if(!snap.exists())return false;
+    const team=snap.data();
+    const newMembers=team.members.filter(m=>m.userId!==userId);
+    if(newMembers.length===0){
+      const{deleteDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+      await deleteDoc(doc(db,'teams',teamId));
+    }else{
+      await updateDoc(doc(db,'teams',teamId),{members:newMembers});
+    }
+    S.lbTeams=S.lbTeams.filter(t=>t.id!==teamId);saveTeamsList();
+    delete S.lbTeamData[teamId];
+    return true;
+  }catch(e){console.warn('Leave team failed:',e);return false;}
+}
+
+async function fetchTeam(teamId){
+  const db=await getFirestoreDb();if(!db)return null;
+  const{doc,getDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  try{
+    const snap=await getDoc(doc(db,'teams',teamId));
+    if(!snap.exists())return null;
+    const team={id:snap.id,...snap.data()};
+    S.lbTeamData[teamId]=team;
+    return team;
+  }catch(e){console.warn('Fetch team failed:',e);return null;}
+}
+
+async function fetchAllUserTeams(){
+  const promises=S.lbTeams.map(t=>fetchTeam(t.id));
+  const results=await Promise.allSettled(promises);
+  // Clean up any teams that no longer exist
+  const valid=[];
+  results.forEach((r,i)=>{
+    if(r.status==='fulfilled'&&r.value){
+      valid.push(S.lbTeams[i]);
+      // Check if user is still a member
+      const userId=getLbUserId();
+      if(!r.value.members?.some(m=>m.userId===userId)){
+        delete S.lbTeamData[S.lbTeams[i].id];
+        return;
+      }
+      valid[valid.length-1]=S.lbTeams[i];
+    }
+  });
+  S.lbTeams=valid;saveTeamsList();
+}
+
 function updateSyncDot(){const d=document.querySelector('.sync-dot');if(!d)return;const sc=loadSync();if(!sc.apiKey){d.style.display='none';return;}d.style.display='';d.className='sync-dot'+({ok:' ok',err:' err',syncing:' ing'}[sc.status]||'');}
 
 /* ════════════════════════════════
@@ -642,7 +740,7 @@ function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.fl
    LIVE UPDATE TICKER
 ════════════════════════════════ */
 let liveTickInt=null;
-function startLiveTick(){clearInterval(liveTickInt);liveTickInt=setInterval(()=>{if(S.data&&(S.view==='dashboard'||S.view==='timetable')){renderLiveElements();}checkStreakReminder();},5000);}
+function startLiveTick(){clearInterval(liveTickInt);liveTickInt=setInterval(()=>{if(S.data&&(S.view==='dashboard'||S.view==='timetable')){renderLiveElements();}checkStreakReminder();},2000);}
 
 // ── Browser notifications ──
 function requestNotifPermission(){if('Notification' in window&&Notification.permission==='default'){Notification.requestPermission();}}
@@ -661,19 +759,17 @@ function checkStreakReminder(){
   new Notification('Meridian — streak at risk',{body:`Your ${streak}-day streak ends at midnight. Even 10 minutes saves it.`,icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="%2328221A"/><text x="16" y="22" text-anchor="middle" font-size="18">🔥</text></svg>'});
 }
 function renderLiveElements(){
-  // Update Now/Next card
+  // Update Now/Next card — swap innerHTML (not outerHTML) so the element stays in the DOM and animations don't replay
   const nn=document.getElementById('nownext');
   if(nn&&S.data){
-    const tmp=document.createElement('div');tmp.innerHTML=renderNowNext();const fresh=tmp.firstElementChild;
-    // Only do full replace if card type changed; otherwise patch text content in-place
-    if(nn.className!==fresh.className){nn.outerHTML=fresh.outerHTML;}
-    else{
-      // Patch countdown text
-      const oldCd=nn.querySelector('#live-countdown'),newCd=fresh.querySelector('#live-countdown');
-      if(oldCd&&newCd&&oldCd.innerHTML!==newCd.innerHTML)oldCd.innerHTML=newCd.innerHTML;
-      // Patch detail line
-      const oldDet=nn.querySelector('.live-detail'),newDet=fresh.querySelector('.live-detail');
-      if(oldDet&&newDet&&oldDet.innerHTML!==newDet.innerHTML)oldDet.innerHTML=newDet.innerHTML;
+    nn.classList.add('no-anim');
+    const html=renderNowNext();
+    const tmp=document.createElement('div');tmp.innerHTML=html;const fresh=tmp.firstElementChild;
+    if(fresh){
+      // Update class list if card type changed
+      nn.className=fresh.className+' no-anim';
+      // Swap inner content only
+      nn.innerHTML=fresh.innerHTML;
     }
   }
   // Update period progress bars
@@ -682,13 +778,7 @@ function renderLiveElements(){
     const pct=Math.min(100,Math.max(0,((now-s)/(e-s))*100));
     el.style.width=pct+'%';
   });
-  // Update live countdown
-  const cd=document.getElementById('live-countdown');
-  if(cd&&S.data?.timetable){
-    const nn2=getNowNext(S.data.timetable);
-    if(nn2.type==='in-class')cd.textContent=`${nn2.mLeft}m left`;
-    else if(nn2.type==='next')cd.textContent=`in ${fmtMins(nn2.mUntil)}`;
-  }
+  // Live countdown is already patched above via innerHTML diff
   // Update vertical day progress bar (timetable view)
   const dpBar=document.getElementById('day-prog-bar');
   if(dpBar){
@@ -754,12 +844,18 @@ let S={
   papersLoading:false,
   moreMenu:false,           // mobile "more" menu open
   // Leaderboard
-  lbTab:0,                   // 0=rankings, 1=head-to-head
+  lbTab:0,                   // 0=rankings, 1=head-to-head, 2=teams
   lbSort:'weekMins',         // weekMins, totalMins, streak, avgScore
   lbData:null,               // cached leaderboard rows
   lbLoading:false,
   lbRival:null,              // selected rival userId for h2h
   lbH2hMode:'weekMins',     // h2h comparison mode
+  // Teams
+  lbTeams:JSON.parse(localStorage.getItem('mer_teams')||'[]'), // [{id,name,code}]
+  lbTeamData:{},             // {teamId: {name,code,members:[{userId,name}]}}
+  lbTeamView:null,           // teamId being viewed, null=list
+  lbTeamVs:null,             // [teamIdA, teamIdB] for comparison
+  lbTeamLoading:false,
   darkMode:localStorage.getItem('mer_dark')==='1',
   pomodoroBreak:false,       // true when in break phase
   pomodoroCount:0,           // completed pomodoros this session
@@ -1182,7 +1278,7 @@ function renderNowNext(){
         <div class="live-badge">NOW IN CLASS</div>
         <div class="live-subj">${getSubName(nn.ev)}</div>
         <div class="live-detail">Period ${nn.ev.period} · ${nn.ev.room} · ends ${fmtTime(e)}</div>
-        <div style="height:3px;background:rgba(58,120,85,.2);border-radius:2px;margin-top:8px;overflow:hidden;"><div style="width:${pct}%;height:100%;background:var(--ok);border-radius:2px;"></div></div>
+        <div style="height:3px;background:rgba(58,120,85,.2);border-radius:2px;margin-top:8px;overflow:hidden;"><div data-period-prog data-start="${nn.ev.start}" data-end="${nn.ev.end}" style="width:${pct}%;height:100%;background:var(--ok);border-radius:2px;transition:width 2s linear;"></div></div>
       </div>
       <div id="live-countdown" class="live-time">${nn.mLeft}m<br><span style="font-size:12px;font-family:'DM Sans',sans-serif;font-weight:300;color:var(--ok);">left</span></div>
       <div class="live-action" data-action="quick-log" data-subject="${nn.ev.subjectId}">Log it</div>
@@ -1227,20 +1323,33 @@ function renderNowNext(){
 
 function getMotivation(sessions,streak){
   const h=new Date().getHours();
+  const dow=new Date().getDay();
   const tMin=todaySess(sessions).reduce((a,s)=>a+s.duration,0);
-  if(tMin>=180)return'Seriously impressive session. Rest your brain — you\'ve earned it.';
-  if(tMin>=120)return'2+ hours locked in. Take a proper break — your brain consolidates learning during rest.';
-  if(tMin>=60)return'Solid progress. Keep the momentum.';
-  if(streak>=30)return'A month of consistency. That kind of discipline compounds.';
-  if(streak>=14)return'Two weeks strong. You\'re building something most people can\'t.';
-  if(streak>=7)return'A full week. Consistency beats intensity every time.';
-  if(h<9)return'Early start? Peak focus happens in the morning for most people.';
-  if(h<12)return'Morning sessions hit different. Your brain is freshest now.';
-  if(h<17)return'Afternoon focus — try the Pomodoro method: 25 min on, 5 min off.';
-  if(h<20)return'Evening grind. Finish strong, then let your brain rest.';
-  if(tMin===0&&streak>3)return'Still time to keep the streak alive. Even 10 minutes counts.';
-  if(tMin===0)return'Small sessions add up. Start with just 15 minutes.';
-  return'Every session is an investment in future you.';
+  const tSess=todaySess(sessions).length;
+  // Achievement-based (priority)
+  if(tMin>=180)return'Incredible effort today. Your brain needs rest now — consolidation happens during downtime.';
+  if(tMin>=120)return'Two hours of deep work. That\'s more than most people manage in a week.';
+  if(tMin>=60&&tSess>=3)return'Multiple subjects covered. This kind of breadth makes a difference.';
+  if(tMin>=60)return'Solid hour logged. Every session like this brings you closer.';
+  // Streak-based
+  if(streak>=50)return'50+ days of discipline. You\'re in a league of your own.';
+  if(streak>=30)return'A full month. This isn\'t motivation anymore — it\'s habit.';
+  if(streak>=14)return'Two weeks of consistency. That\'s when real progress starts compounding.';
+  if(streak>=7)return'One week locked in. Consistency always beats intensity.';
+  // Weekend
+  if((dow===0||dow===6)&&tMin===0)return'Weekend session? Even 30 minutes today puts you ahead on Monday.';
+  if((dow===0||dow===6)&&tMin>0)return'Weekend study pays off. Monday-you will be grateful.';
+  // Time-of-day
+  if(h<9)return'Early start. Morning focus is a competitive advantage.';
+  if(h<12)return'Peak cognitive hours. Make them count.';
+  if(h<15)return'Afternoon is prime time for practice problems and active recall.';
+  if(h<18)return'Good time to review today\'s content while it\'s still fresh.';
+  if(h<21)return'Evening study locks in long-term memory. Stay focused.';
+  // Streak at risk
+  if(tMin===0&&streak>3)return'Your streak is at risk. Even 10 minutes keeps it alive.';
+  if(tMin===0&&streak>0)return'Don\'t break the chain. A quick session is all it takes.';
+  if(tMin===0)return'The hardest part is starting. Just 15 minutes.';
+  return'Every session compounds. Keep going.';
 }
 
 function renderDash(){
@@ -1251,7 +1360,7 @@ function renderDash(){
   const exam=getExamDate(year),dLeft=daysUntil(exam.date);
   const h=new Date().getHours();
   const eName=esc(name);
-  const greet=h<5?`Up late, ${eName}.`:h<12?`Morning, ${eName}.`:h<17?`Afternoon, ${eName}.`:`Evening, ${eName}.`;
+  const greet=h<5?`Burning the midnight oil, ${eName}.`:h<12?`Good morning, ${eName}.`:h<17?`Good afternoon, ${eName}.`:h<21?`Good evening, ${eName}.`:`Night owl mode, ${eName}.`;
   const sMsg=streak===0?'Start your streak today.':risk&&streak>=7?`Your ${streak}-day streak ends tonight. Even 10 minutes saves it.`:risk?'Log before midnight — streak at risk.':streak===1?'Day 1. Come back tomorrow.':streak<7?`${streak} days straight.`:`${streak} days. Don't stop.`;
   const R=37,CIRC=2*Math.PI*R,pct=Math.min(1,streak/30),dashVal=pct*CIRC;
   const daysActive=new Set(sessions.filter(s=>s.subject!=='grace').map(s=>s.date)).size;
@@ -1361,7 +1470,7 @@ function renderDash(){
     <div class="ov-tile${dLeft<=14?' urg-red':dLeft<=30?' urg-amber':dLeft<=60?' accent':''}">
       <div class="ov-lbl">${exam.name}</div>
       <div class="ov-val">${Math.max(0,dLeft)}</div>
-      <div class="ov-sub">days left</div>
+      <div class="ov-sub">${dLeft<=0?'Exams now':'day'+(dLeft!==1?'s':'')+' to go'}</div>
     </div>
   </div>
 
@@ -1384,11 +1493,11 @@ function renderDash(){
     }).join('')}
   </div>`:hasTT?`
   <div class="sec mb8"><span class="sec-lbl">Schedule</span><span class="sec-link" data-action="nav-timetable">See week →</span></div>
-  <div style="font-size:13px;color:var(--tx3);margin-bottom:14px;padding:10px 14px;background:var(--srf);border:1px solid var(--bd);border-radius:var(--rm);">No classes today — ${isWeekend(today())?'enjoy the weekend':'check your schedule'}.</div>`:''}
+  <div style="font-size:13px;color:var(--tx3);margin-bottom:18px;padding:14px 16px;background:var(--srf);border:1px solid var(--bd);border-radius:14px;">No classes today — ${isWeekend(today())?'enjoy the weekend. Perfect time for independent study.':'good day to get ahead on revision.'}.</div>`:''}
 
   <div class="cov-card${done.length===subjects.length?' cov-done':''}">
     <div class="cov-top">
-      <span class="cov-lbl">${done.length===subjects.length?'All subjects covered today 🎯':done.length===0?'Tap a subject below to log':`${subjects.length-done.length} subject${subjects.length-done.length!==1?'s':''} left today`}</span>
+      <span class="cov-lbl">${done.length===subjects.length?'All subjects covered today — well done':done.length===0?'No subjects covered yet — tap one below':`${subjects.length-done.length} subject${subjects.length-done.length!==1?'s':''} remaining today`}</span>
       <span class="cov-frac">${done.length}<small>/${subjects.length}</small></span>
     </div>
     <div class="cov-track"><div class="cov-fill${done.length===subjects.length?' done':''}" data-bw="${cvPct}" style="width:0%"></div></div>
@@ -1436,7 +1545,7 @@ function renderDash(){
         ${hasClassToday&&m===0?`<div class="sub-class-dot"></div>`:''}
         <div class="sub-abb">${sub.abbr}</div>
         <div class="sub-name">${sub.name}</div>
-        <div class="sub-time">${m>0?fmtDur(m)+' today':'Tap to log'}</div>
+        <div class="sub-time">${m>0?fmtDur(m)+' / '+sub.target+'m':hasClassToday?'In class today':'—'}</div>
         <div class="sub-bar"><div class="sub-bar-f" data-bw="${pct}" style="width:0%"></div></div>
       </div>`;
     }).join('')}
@@ -1445,7 +1554,7 @@ function renderDash(){
   ${renderDashPsych(sessions,subjects)}
 
   <div class="sec"><span class="sec-lbl">Recent sessions</span><span class="sec-link" data-action="nav-history">All →</span></div>
-  ${recent.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">No sessions yet</div><div class="empty-s">Use the timer or press L to log your first session — even 10 minutes counts.</div><div class="empty-action" data-action="open-log">+ Log first session</div></div>`
+  ${recent.length===0?`<div class="empty"><div class="empty-e">📚</div><div class="empty-t">Your study journey starts here</div><div class="empty-s">Log your first session to start tracking progress. Even 15 minutes a day builds real momentum over time.</div><div class="empty-action" data-action="open-log">+ Log your first session</div></div>`
   :`<div class="sess-list">${recent.map(renderSessRow).join('')}</div>`}
 
   ${renderDashLb()}`;
@@ -1517,13 +1626,15 @@ function renderDashLb(){
       const isMe=r.userId===myId;
       return`<div class="dash-lb-row${isMe?' dash-lb-me':''}" data-action="nav-leaderboard">
         <span class="dash-lb-medal">${medals[i]}</span>
-        <span class="dash-lb-name">${esc(r.name)}${isMe?' (you)':''}</span>
+        <div class="dash-lb-av" style="background:${isMe?'var(--acc)':'var(--srf3)'};color:${isMe?'#fff':'var(--tx2)'};">${esc((r.name||'?')[0].toUpperCase())}</div>
+        <span class="dash-lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</span>
         <span class="dash-lb-val">${fmtDur(r.weekMins||0)}</span>
       </div>`;
     }).join('')}
     ${myRank>2?`<div class="dash-lb-row dash-lb-me" data-action="nav-leaderboard">
-      <span class="dash-lb-medal" style="font-size:11px;">#${myRank+1}</span>
-      <span class="dash-lb-name">${esc(S.data?.name||'You')} (you)</span>
+      <span class="dash-lb-medal" style="font-size:11px;font-weight:600;">#${myRank+1}</span>
+      <div class="dash-lb-av" style="background:var(--acc);color:#fff;">${esc((S.data?.name||'Y')[0].toUpperCase())}</div>
+      <span class="dash-lb-name">${esc(S.data?.name||'You')} <span class="lb-you">you</span></span>
       <span class="dash-lb-val">${fmtDur(sorted[myRank]?.weekMins||0)}</span>
     </div>`:''}
   </div>`;
@@ -1881,17 +1992,30 @@ function renderProgress(){
       }).join('');
       const deltaClass=delta>0?'up':delta<0?'down':'flat';
       const deltaLabel=delta>0?`↑ ${delta}`:`${delta}`;
+      const confEmoji=avgAll>=4?'💪':avgAll>=3?'👍':avgAll>=2?'🤔':'😰';
       return`<div class="conf-trend-card">
-        <div style="display:flex;align-items:center;gap:9px;margin-bottom:12px;">
-          <div style="width:28px;height:28px;border-radius:6px;background:${c.bg};border:1px solid ${c.bd};display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;color:${c.tx};font-weight:500;">${sub.abbr}</div>
-          <div class="conf-subject-name" style="margin-bottom:0;">${sub.name}</div>
-          <div class="conf-trend-delta ${deltaClass}" style="margin-left:auto;">${deltaLabel}</div>
+        <div class="conf-trend-header">
+          <div class="conf-subj-badge" style="background:${c.bg};border-color:${c.bd};color:${c.tx};">${sub.abbr}</div>
+          <div class="conf-trend-info">
+            <div class="conf-subject-name">${sub.name}</div>
+            <div class="conf-subject-meta">${subSess.length} sessions · last ${fmtDate(subSess[subSess.length-1].date)}</div>
+          </div>
+          <div class="conf-trend-delta ${deltaClass}">${delta>0?'+':''}${deltaLabel}</div>
         </div>
         <div class="conf-trend-row">${bars}</div>
-        <div class="conf-legend" style="margin-top:10px;">
-          <div><div class="conf-trend-val">${avgAll}</div><div class="conf-trend-label">Avg confidence</div></div>
-          <div><div class="conf-trend-val">${subSess.length}</div><div class="conf-trend-label">Sessions</div></div>
-          <div><div class="conf-trend-val">${avgRecent}</div><div class="conf-trend-label">Recent 3</div></div>
+        <div class="conf-legend">
+          <div class="conf-legend-item">
+            <div class="conf-trend-val">${confEmoji} ${avgAll}</div>
+            <div class="conf-trend-label">Average</div>
+          </div>
+          <div class="conf-legend-item">
+            <div class="conf-trend-val">${avgRecent}</div>
+            <div class="conf-trend-label">Recent 3</div>
+          </div>
+          <div class="conf-legend-item">
+            <div class="conf-trend-val">${subSess.length}</div>
+            <div class="conf-trend-label">Sessions</div>
+          </div>
         </div>
       </div>`;
     }).filter(Boolean);
@@ -1954,16 +2078,20 @@ function renderProgress(){
       const c=getSubjColor(sub);
       const coverage=topics.length?Math.round((studiedTopics.size/topics.length)*100):0;
       const topicTags=topics.map(t=>`<div class="topic-tag ${studiedTopics.has(t)?'studied':'unstudied'}">${t}</div>`).join('');
+      const covColor=coverage>=80?'var(--ok)':coverage>=50?'var(--acc)':'var(--err)';
       return`<div class="topic-coverage-card">
         <div class="topic-sub-header">
-          <div style="display:flex;align-items:center;gap:8px;">
-            <div style="width:26px;height:26px;border-radius:5px;background:${c.bg};border:1px solid ${c.bd};display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;color:${c.tx};font-weight:500;">${sub.abbr}</div>
-            <span class="topic-sub-name">${sub.name}</span>
+          <div class="topic-sub-left">
+            <div class="conf-subj-badge" style="background:${c.bg};border-color:${c.bd};color:${c.tx};">${sub.abbr}</div>
+            <div>
+              <div class="topic-sub-name">${sub.name}</div>
+              <div class="topic-sub-meta">${studiedTopics.size} of ${topics.length} topics</div>
+            </div>
           </div>
-          <span class="topic-sub-count">${studiedTopics.size}/${topics.length} topics · ${coverage}%</span>
+          <div class="topic-pct" style="color:${covColor};">${coverage}%</div>
         </div>
-        <div style="height:4px;background:var(--srf2);border-radius:2px;overflow:hidden;margin-bottom:10px;">
-          <div style="height:100%;width:${coverage}%;background:${coverage>=70?'var(--ok)':'var(--acc)'};border-radius:2px;transition:width .5s cubic-bezier(.4,0,.2,1);"></div>
+        <div class="topic-progress-track">
+          <div class="topic-progress-fill" style="width:${coverage}%;background:${covColor};"></div>
         </div>
         <div class="topic-tags-list">${topicTags}</div>
       </div>`;
@@ -2010,24 +2138,57 @@ function renderProgress(){
         <div class="insight-body">${trendPct>=10?'Strong momentum. Keep it going.':trendPct>=0?'Slight improvement. Build on it.':trendPct>=-15?'A bit less than last week. Normal fluctuation.':'Significantly less than last week. Get back on track.'}</div>
       </div>
     </div>`:'';
+    // Average line position
+    const avgPctLine=maxMins>0?Math.round((avgWeekly/maxMins)*100):0;
+
     return`
-    <div class="card mb12" style="padding:16px 18px;">
-      <div class="sec mb12"><span class="sec-lbl">Weekly hours — 8 weeks</span></div>
-      <div class="momentum-chart">${bars}</div>
+    <div class="card mom-chart-card">
+      <div class="mom-chart-header">
+        <div class="sec-lbl">Weekly study — 8 weeks</div>
+        ${trendPct!==null?`<div class="mom-trend-badge ${trendPct>=0?'up':'down'}">${trendPct>=0?'↑':'↓'} ${Math.abs(trendPct)}%</div>`:''}
+      </div>
+      <div class="momentum-chart-wrap">
+        <div class="mom-avg-line" style="bottom:${avgPctLine}%;"><span class="mom-avg-tag">avg</span></div>
+        <div class="momentum-chart">${bars}</div>
+      </div>
       <div class="momentum-summary">
-        <div><div class="mom-stat-v">${fmtDur(thisWeek.mins)||'—'}</div><div class="mom-stat-l">This week</div></div>
-        <div><div class="mom-stat-v">${fmtDur(avgWeekly)||'—'}</div><div class="mom-stat-l">Weekly avg</div></div>
-        <div><div class="mom-stat-v">${fmtDur(best.mins)||'—'}</div><div class="mom-stat-l">Best week</div></div>
+        <div class="mom-summary-item"><div class="mom-stat-v">${fmtDur(thisWeek.mins)||'—'}</div><div class="mom-stat-l">This week</div></div>
+        <div class="mom-summary-item"><div class="mom-stat-v">${fmtDur(avgWeekly)||'—'}</div><div class="mom-stat-l">Weekly avg</div></div>
+        <div class="mom-summary-item"><div class="mom-stat-v">${fmtDur(best.mins)||'—'}</div><div class="mom-stat-l">Best week</div></div>
       </div>
     </div>
     ${trendInsight}
-    <div class="card" style="padding:16px 18px;">
-      <div class="sec-lbl mb12">Patterns</div>
-      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
-        <div class="stile"><div class="stile-l">Avg session</div><div class="stile-v">${avgSessLen}m</div><div class="stile-s">per study block</div></div>
-        <div class="stile"><div class="stile-l">Sessions/week</div><div class="stile-v">${Math.round(totalSessions/Math.max(1,weeks.filter(w=>w.mins>0).length)*10)/10}</div><div class="stile-s">avg active weeks</div></div>
-        <div class="stile"><div class="stile-l">Most studied</div><div class="stile-v" style="font-size:18px;">${(()=>{const top=subjects.map(s=>({s,m:subMinsAll(sessions,s.id)})).sort((a,b)=>b.m-a.m)[0];return top?.s.abbr||'—';})()}</div><div class="stile-s">by time</div></div>
-        <div class="stile${aboveAvg?' green':''}"><div class="stile-l">This week</div><div class="stile-v" style="font-size:18px;">${aboveAvg?'↑':'↓'}</div><div class="stile-s">${aboveAvg?'above avg':'below avg'}</div></div>
+    <div class="card mom-patterns-card">
+      <div class="sec-lbl" style="margin-bottom:12px;">Patterns</div>
+      <div class="mom-pattern-grid">
+        <div class="mom-pattern">
+          <div class="mom-pattern-icon">◷</div>
+          <div class="mom-pattern-body">
+            <div class="mom-pattern-v">${avgSessLen}m</div>
+            <div class="mom-pattern-l">Avg session length</div>
+          </div>
+        </div>
+        <div class="mom-pattern">
+          <div class="mom-pattern-icon">↻</div>
+          <div class="mom-pattern-body">
+            <div class="mom-pattern-v">${Math.round(totalSessions/Math.max(1,weeks.filter(w=>w.mins>0).length)*10)/10}</div>
+            <div class="mom-pattern-l">Sessions per week</div>
+          </div>
+        </div>
+        <div class="mom-pattern">
+          <div class="mom-pattern-icon">★</div>
+          <div class="mom-pattern-body">
+            <div class="mom-pattern-v">${(()=>{const top=subjects.map(s=>({s,m:subMinsAll(sessions,s.id)})).sort((a,b)=>b.m-a.m)[0];return top?.s.name||'—';})()}</div>
+            <div class="mom-pattern-l">Most studied subject</div>
+          </div>
+        </div>
+        <div class="mom-pattern${aboveAvg?' mom-pattern-good':''}">
+          <div class="mom-pattern-icon">${aboveAvg?'↑':'↓'}</div>
+          <div class="mom-pattern-body">
+            <div class="mom-pattern-v">${aboveAvg?'Above':'Below'} avg</div>
+            <div class="mom-pattern-l">This week's pace</div>
+          </div>
+        </div>
       </div>
     </div>`;
   }
@@ -2151,10 +2312,35 @@ function renderProgress(){
   }
 
   const content=[renderConfidenceTab,renderScoresTab,renderTopicsTab,renderMomentumTab][S.progTab]?.();
-  const progTabs=['Confidence','Scores','Topics','Momentum'];
+  const progTabs=[{label:'Confidence',icon:'◈'},{label:'Scores',icon:'◉'},{label:'Topics',icon:'▦'},{label:'Momentum',icon:'↗'}];
+
+  // Quick summary stats
+  const totalStudied=totalMins(sessions);
+  const avgConf=real.filter(s=>s.confidence>0).length?Math.round(real.filter(s=>s.confidence>0).reduce((a,s)=>a+s.confidence,0)/real.filter(s=>s.confidence>0).length*10)/10:null;
+  const topicsCovered=new Set(real.filter(s=>s.topic).map(s=>s.topic)).size;
+  const testCount=(S.data.tests||[]).length;
+
   return`
   <div class="pg-title">Progress</div>
-  <div class="prog-tabs">${progTabs.map((t,i)=>`<div class="prog-tab${S.progTab===i?' on':''}" data-action="prog-tab" data-tab="${i}">${t}</div>`).join('')}</div>
+  <div class="prog-summary">
+    <div class="prog-summary-stat">
+      <div class="prog-summary-v">${fmtDur(totalStudied)}</div>
+      <div class="prog-summary-l">total study</div>
+    </div>
+    <div class="prog-summary-stat">
+      <div class="prog-summary-v">${avgConf||'—'}</div>
+      <div class="prog-summary-l">avg confidence</div>
+    </div>
+    <div class="prog-summary-stat">
+      <div class="prog-summary-v">${topicsCovered}</div>
+      <div class="prog-summary-l">topics covered</div>
+    </div>
+    <div class="prog-summary-stat">
+      <div class="prog-summary-v">${testCount}</div>
+      <div class="prog-summary-l">test${testCount!==1?'s':''} logged</div>
+    </div>
+  </div>
+  <div class="prog-tabs">${progTabs.map((t,i)=>`<div class="prog-tab${S.progTab===i?' on':''}" data-action="prog-tab" data-tab="${i}"><span class="prog-tab-icon">${t.icon}</span>${t.label}</div>`).join('')}</div>
   ${content}`;
 }
 
@@ -2623,45 +2809,61 @@ function renderPdfViewer(){
    TIMER VIEW
 ════════════════════════════════ */
 function renderTimer(){
+  const pomoDots=Array.from({length:4},(_,i)=>`<div class="pomo-dot${i<(S.pomodoroCount||0)%4?' done':''}${i<(S.pomodoroCount||0)%4&&i===(S.pomodoroCount||0)%4-1?' latest':''}"></div>`).join('');
+  const pomoCount=S.pomodoroCount||0;
+
   if(S.pomodoroBreak){
     const brem=Math.max(0,breakTarget-breakElap),bm=Math.floor(brem/60),bs=brem%60;
-    const isLong=S.pomodoroCount%4===0;
+    const isLong=pomoCount%4===0;
     const bPct=Math.min(100,(breakElap/breakTarget)*100);
     return`
     <div class="pg-title">Timer</div>
-    <div class="card" style="padding:24px 20px;">
+    <div class="card timer-break-card">
       <div class="pomo-break">
         <div class="pomo-break-icon">${isLong?'🧘':'☕'}</div>
         <div class="pomo-break-title">${isLong?'Long break — you earned it':'Take a break'}</div>
         <div class="pomo-break-sub">${isLong?'Stand up, stretch, grab water. Your brain consolidates learning during rest.':'Step away from the screen. Look at something 20 feet away for 20 seconds.'}</div>
         <div class="pomo-break-timer" id="break-timer">${String(bm).padStart(2,'0')}:${String(bs).padStart(2,'0')}</div>
-        <div style="height:3px;background:var(--srf2);border-radius:2px;margin:0 40px 16px;overflow:hidden;"><div style="height:100%;width:${bPct}%;background:var(--ok);border-radius:2px;transition:width .5s linear;"></div></div>
-        <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);margin-bottom:20px;">${S.pomodoroCount} pomodoro${S.pomodoroCount!==1?'s':''} done</div>
+        <div class="break-progress"><div class="break-progress-fill" style="width:${bPct}%;"></div></div>
+        <div class="pomo-tracker">
+          <div class="pomo-dots">${pomoDots}</div>
+          <span class="pomo-count">${pomoCount} pomodoro${pomoCount!==1?'s':''}</span>
+        </div>
         <div class="tbtns">
-          <button class="tbtn tbtn-p" style="background:var(--ok);border-color:var(--ok);" data-action="open-log">Log session →</button>
+          <button class="tbtn tbtn-log" data-action="open-log">Log session →</button>
           <button class="tbtn tbtn-s" data-action="skip-break">Skip break</button>
         </div>
       </div>
     </div>`;
   }
+
   const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;
   const pct=Math.min(100,(timerElap/timerTarget)*100);
   const R=80,CIRC=2*Math.PI*R;
   const offset=CIRC-(pct/100)*CIRC;
   const elapMin=Math.floor(timerElap/60);
+  const presets=[15,20,25,30,45,60,90];
+  const presetLabels={15:'Quick',25:'Pomodoro',45:'Deep',60:'Marathon',90:'Ultra'};
+
+  // Today's timer sessions
+  const td=today();
+  const todaySess=(S.data?.sessions||[]).filter(s=>s.date===td&&s.subject!=='grace');
+  const todayMins=todaySess.reduce((a,s)=>a+s.duration,0);
+
   return`
   <div class="pg-title">Timer</div>
-  <div class="card timer-card">
+  <div class="card timer-card${timerRunning?' timer-active':''}">
+    ${timerRunning?'<div class="timer-glow"></div>':''}
     <div class="timer-face">
       <div class="timer-ring-wrap" style="width:200px;height:200px;">
         <svg class="timer-ring-svg" width="200" height="200" viewBox="0 0 200 200">
           <circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--srf2)" stroke-width="5"/>
-          ${timerRunning||timerElap>0?`<circle cx="100" cy="100" r="${R}" fill="none" stroke="${timerRunning?'var(--acc)':'var(--bdS)'}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;filter:${timerRunning?'drop-shadow(0 0 6px rgba(192,90,48,.3))':'none'};"/>`
+          ${timerRunning||timerElap>0?`<circle cx="100" cy="100" r="${R}" fill="none" stroke="${timerRunning?'var(--acc)':'var(--bdS)'}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;filter:${timerRunning?'drop-shadow(0 0 8px rgba(192,90,48,.35))':'none'};"/>`
           :`<circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--bdS)" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${CIRC}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;"/>`}
         </svg>
         <div class="timer-ring-center">
           <div class="timer-num${timerRunning?' run':''}" id="tt-time">${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}</div>
-          <div class="timer-status" id="tt-lbl">${timerRunning?'Running…':timerElap>0?'Paused':'Ready'}</div>
+          <div class="timer-status" id="tt-lbl">${timerRunning?'Focus time':timerElap>0?'Paused':'Ready'}</div>
         </div>
       </div>
     </div>
@@ -2675,14 +2877,56 @@ function renderTimer(){
         :`<button class="tbtn tbtn-p" data-action="timer-start">${timerElap>0?'Resume':'Start'}</button>`}
       <button class="tbtn tbtn-s" data-action="timer-reset">Reset</button>
     </div>
-    ${timerElap>0&&!timerRunning?`<button class="tbtn tbtn-p timer-log-btn" data-action="open-log">Log ${fmtDur(Math.ceil(timerElap/60))} session →</button>`:''}
-    <div class="row-divider"></div>
-    <div class="sec mb8"><span class="sec-lbl">Presets</span></div>
-    <div class="dur-grid">${[15,20,25,30,45,60,90].map(t=>`<div class="dur-pill${timerTarget===t*60&&!timerRunning?' on':''}" data-action="set-timer" data-dur="${t}">${t}m</div>`).join('')}</div>
+    ${timerElap>0&&!timerRunning?`<button class="tbtn tbtn-log timer-log-btn" data-action="open-log">Log ${fmtDur(Math.ceil(timerElap/60))} session →</button>`:''}
   </div>
+
+  <div class="card timer-presets-card">
+    <div class="sec mb8"><span class="sec-lbl">Duration</span></div>
+    <div class="timer-preset-grid">${presets.map(t=>{
+      const active=timerTarget===t*60&&!timerRunning;
+      const label=presetLabels[t]||'';
+      return`<div class="timer-preset${active?' on':''}" data-action="set-timer" data-dur="${t}">
+        <span class="timer-preset-num">${t}</span><span class="timer-preset-unit">min</span>
+        ${label?`<span class="timer-preset-label">${label}</span>`:''}
+      </div>`;
+    }).join('')}</div>
+  </div>
+
+  ${pomoCount>0?`<div class="card timer-pomo-card">
+    <div class="sec mb8"><span class="sec-lbl">Pomodoros</span></div>
+    <div class="pomo-tracker">
+      <div class="pomo-dots">${pomoDots}</div>
+      <span class="pomo-count">${pomoCount} done${pomoCount%4===0?' — long break earned!':` — ${4-pomoCount%4} until long break`}</span>
+    </div>
+  </div>`:''}
+
+  <div class="card timer-today-card">
+    <div class="sec mb8"><span class="sec-lbl">Today</span></div>
+    ${todaySess.length?`<div class="timer-today-stats">
+      <div class="timer-today-stat">
+        <div class="timer-today-v">${fmtDur(todayMins)}</div>
+        <div class="timer-today-l">studied</div>
+      </div>
+      <div class="timer-today-stat">
+        <div class="timer-today-v">${todaySess.length}</div>
+        <div class="timer-today-l">session${todaySess.length!==1?'s':''}</div>
+      </div>
+    </div>
+    <div class="timer-today-list">${todaySess.slice(-3).reverse().map(ss=>{
+      const sub=S.data.subjects.find(x=>x.id===ss.subject)||{name:ss.subject,abbr:'?',color:0};
+      const c=getSubjColor(sub);
+      return`<div class="timer-today-row">
+        <div class="timer-today-dot" style="background:${c.bg};border:1px solid ${c.bd};"></div>
+        <span class="timer-today-name">${sub.name}</span>
+        <span class="timer-today-dur">${fmtDur(ss.duration)}</span>
+      </div>`;
+    }).join('')}</div>`
+    :`<div class="timer-today-empty">No sessions yet today — start your first one above</div>`}
+  </div>
+
   ${!timerRunning&&timerElap===0?`<div class="card timer-tip">
     <div class="timer-tip-icon">◷</div>
-    <div><strong>Set a preset</strong> → start → study without distraction → tap <strong style="color:var(--ok);">Log it</strong> when done.</div>
+    <div><strong>Pick a duration</strong> → start → study with focus → tap <strong style="color:var(--ok);">Log it</strong> when done.</div>
   </div>`:''}`;
 }
 
@@ -2792,11 +3036,7 @@ function renderSettings(){
 function renderLeaderboard(){
   if(!window.FIREBASE_CONFIG)return`
     <div class="pg-title">Leaderboard</div>
-    <div style="text-align:center;padding:60px 20px;color:var(--tx3);">
-      <div style="font-size:32px;margin-bottom:12px;">🏆</div>
-      <div style="font-size:14px;font-weight:500;color:var(--tx);margin-bottom:6px;">Firebase not configured</div>
-      <div style="font-size:13px;">Set up Firebase in <span style="color:var(--acc);cursor:pointer;" data-action="nav-settings">Settings</span> to enable the leaderboard.</div>
-    </div>`;
+    <div class="empty"><div class="empty-e">🏆</div><div class="empty-t">Firebase not configured</div><div class="empty-s">Set up Firebase in Settings to enable the leaderboard and compete with friends.</div><div class="empty-action" data-action="nav-settings">Open Settings</div></div>`;
 
   const myId=getLbUserId();
   const rows=S.lbData||[];
@@ -2807,6 +3047,7 @@ function renderLeaderboard(){
   });
 
   const sortLabel={weekMins:'This week',totalMins:'All-time',streak:'Streak',avgScore:'Test avg'};
+  const sortIcons={weekMins:'◷',totalMins:'∑',streak:'🔥',avgScore:'◈'};
 
   function fmtLbVal(row,key){
     if(key==='weekMins'||key==='totalMins')return fmtDur(row[key]||0);
@@ -2815,9 +3056,15 @@ function renderLeaderboard(){
     return row[key]||'—';
   }
 
+  function fmtLbValShort(row,key){
+    if(key==='weekMins'||key==='totalMins')return fmtDur(row[key]||0);
+    if(key==='streak')return(row[key]||0)+'d';
+    if(key==='avgScore')return row[key]!=null?row[key]+'%':'—';
+    return row[key]||'—';
+  }
+
   function secondaryInfo(r,key){
-    // Show a secondary stat that isn't the primary sort
-    if(key==='weekMins') return`${r.streak||0}🔥 · Yr ${r.year||'?'}`;
+    if(key==='weekMins') return`${r.streak||0} day streak · Yr ${r.year||'?'}`;
     if(key==='totalMins') return`${r.sessCount||0} sessions · Yr ${r.year||'?'}`;
     if(key==='streak') return`${fmtDur(r.weekMins||0)} this week`;
     if(key==='avgScore') return`${r.testCount||0} test${r.testCount===1?'':'s'} · Yr ${r.year||'?'}`;
@@ -2826,30 +3073,95 @@ function renderLeaderboard(){
 
   function medal(i){return i===0?'🥇':i===1?'🥈':i===2?'🥉':'';}
 
+  // ── Podium for top 3 ──
+  function renderPodium(){
+    if(sorted.length<2)return'';
+    const top3=sorted.slice(0,3);
+    // Reorder for podium: [2nd, 1st, 3rd]
+    const podiumOrder=top3.length>=3?[top3[1],top3[0],top3[2]]:[top3[1]||null,top3[0],null];
+    const heights=[72,96,56];
+    const places=[2,1,3];
+    const medalEmojis=['🥈','🥇','🥉'];
+    const podiumBgs=['var(--srf2)','linear-gradient(180deg,rgba(192,90,48,.12),rgba(192,90,48,.04))','var(--srf2)'];
+
+    return`<div class="lb-podium">
+      ${podiumOrder.map((r,i)=>{
+        if(!r)return`<div class="lb-podium-slot lb-podium-empty"></div>`;
+        const isMe=r.userId===myId;
+        return`<div class="lb-podium-slot${isMe?' lb-podium-me':''}"${!isMe?` data-action="lb-pick-rival" data-uid="${r.userId}"`:''}">
+          <div class="lb-podium-avatar${isMe?' lb-podium-avatar-me':''}" style="${i===1?'width:56px;height:56px;font-size:22px;':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
+          <div class="lb-podium-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
+          <div class="lb-podium-val">${fmtLbValShort(r,sortKey)}</div>
+          <div class="lb-podium-bar" style="height:${heights[i]}px;background:${podiumBgs[i]};">
+            <span class="lb-podium-medal">${medalEmojis[i]}</span>
+            <span class="lb-podium-place">${places[i]}</span>
+          </div>
+        </div>`;
+      }).join('')}
+    </div>`;
+  }
+
+  // ── My stats card ──
+  function renderMyStats(){
+    const me=rows.find(r=>r.userId===myId);
+    if(!me)return'';
+    const myRank=sorted.findIndex(r=>r.userId===myId);
+    const pctile=sorted.length>1?Math.round(((sorted.length-1-myRank)/(sorted.length-1))*100):100;
+    return`<div class="lb-mystats">
+      <div class="lb-mystats-rank">
+        <div class="lb-mystats-rank-num">#${myRank+1}</div>
+        <div class="lb-mystats-rank-of">of ${sorted.length}</div>
+      </div>
+      <div class="lb-mystats-grid">
+        <div class="lb-mystats-item">
+          <div class="lb-mystats-v">${fmtDur(me.weekMins||0)}</div>
+          <div class="lb-mystats-l">This week</div>
+        </div>
+        <div class="lb-mystats-item">
+          <div class="lb-mystats-v">${me.streak||0}d</div>
+          <div class="lb-mystats-l">Streak</div>
+        </div>
+        <div class="lb-mystats-item">
+          <div class="lb-mystats-v">${fmtDur(me.totalMins||0)}</div>
+          <div class="lb-mystats-l">All-time</div>
+        </div>
+        <div class="lb-mystats-item">
+          <div class="lb-mystats-v">${me.avgScore!=null?me.avgScore+'%':'—'}</div>
+          <div class="lb-mystats-l">Test avg</div>
+        </div>
+      </div>
+      ${pctile>=50?`<div class="lb-mystats-pctile">Top ${100-pctile}% of all students</div>`:''}
+    </div>`;
+  }
+
   // ── Rankings tab ──
   function renderRankings(){
     if(S.lbLoading)return`<div class="lb-loading"><div class="lb-spinner"></div><div style="margin-top:12px;">Loading leaderboard…</div></div>`;
     if(!rows.length)return`<div class="lb-empty">
-      <div style="font-size:36px;margin-bottom:10px;">🏆</div>
-      <div style="font-size:14px;font-weight:500;color:var(--tx);margin-bottom:4px;">No one on the board yet</div>
-      <div style="font-size:13px;">Log a study session and you'll appear here!</div>
+      <div style="font-size:40px;margin-bottom:12px;">🏆</div>
+      <div style="font-size:15px;font-weight:500;color:var(--tx);margin-bottom:6px;">No one on the board yet</div>
+      <div style="font-size:13px;line-height:1.5;">Log a study session and you'll be the first!</div>
     </div>`;
 
-    // Find my rank
     const myRank=sorted.findIndex(r=>r.userId===myId);
+    const rest=sorted.slice(3);
 
     return`
     <div class="lb-sort-bar">
-      ${Object.keys(sortLabel).map(k=>`<div class="lb-sort-chip${sortKey===k?' on':''}" data-action="lb-sort" data-key="${k}">${sortLabel[k]}</div>`).join('')}
+      ${Object.keys(sortLabel).map(k=>`<div class="lb-sort-chip${sortKey===k?' on':''}" data-action="lb-sort" data-key="${k}"><span class="lb-sort-ic">${sortIcons[k]}</span>${sortLabel[k]}</div>`).join('')}
     </div>
-    ${myRank>=0?`<div class="lb-my-rank">You're <strong>#${myRank+1}</strong> of ${sorted.length} · ${fmtLbVal(sorted[myRank],sortKey)}</div>`:''}
+    ${renderPodium()}
+    ${renderMyStats()}
+    ${rest.length?`<div class="lb-rest-label">Everyone else</div>
     <div class="lb-list">
-      ${sorted.map((r,i)=>{
+      ${rest.map((r,i)=>{
         const isMe=r.userId===myId;
         const myName=(S.data?.name||'').trim().toLowerCase();
         const isDupe=!isMe&&myName&&(r.name||'').trim().toLowerCase()===myName;
+        const rank=i+4;
         return`<div class="lb-row${isMe?' lb-me':''}"${isMe?'':` data-action="lb-pick-rival" data-uid="${r.userId}"`}>
-          <div class="lb-rank">${medal(i)||'<span class="lb-rank-num">'+(i+1)+'</span>'}</div>
+          <div class="lb-rank"><span class="lb-rank-num">${rank}</span></div>
+          <div class="lb-avatar" style="background:${isMe?'var(--acc)':'var(--srf3)'};color:${isMe?'#fff':'var(--tx2)'};">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-info">
             <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you" style="color:var(--err);background:rgba(184,50,40,.08);">dupe</span>':''}</div>
             <div class="lb-sub">${secondaryInfo(r,sortKey)}</div>
@@ -2861,7 +3173,7 @@ function renderLeaderboard(){
           </div>
         </div>`;
       }).join('')}
-    </div>`;
+    </div>`:''}`;
   }
 
   // ── Head-to-head tab ──
@@ -2871,21 +3183,25 @@ function renderLeaderboard(){
     if(!S.lbRival){
       if(S.lbLoading)return`<div class="lb-loading"><div class="lb-spinner"></div><div style="margin-top:12px;">Loading…</div></div>`;
       if(!others.length)return`<div class="lb-empty">
-        <div style="font-size:36px;margin-bottom:10px;">⚔️</div>
-        <div style="font-size:14px;font-weight:500;color:var(--tx);margin-bottom:4px;">No rivals yet</div>
-        <div style="font-size:13px;">Share Meridian with friends to compete!</div>
+        <div style="font-size:40px;margin-bottom:12px;">⚔️</div>
+        <div style="font-size:15px;font-weight:500;color:var(--tx);margin-bottom:6px;">No rivals yet</div>
+        <div style="font-size:13px;line-height:1.5;">Share Meridian with friends to compete head-to-head!</div>
       </div>`;
       return`
       <div class="lb-h2h-pick">
-        <div class="lb-h2h-title">Choose your rival</div>
+        <div class="lb-h2h-title">Pick someone to challenge</div>
+        <div class="lb-h2h-subtitle">Compare your stats side by side</div>
         <div class="lb-list">
-          ${others.map(r=>`<div class="lb-row lb-rival-pick" data-action="lb-pick-rival" data-uid="${r.userId}">
+          ${others.map(r=>{
+            const rRank=sorted.findIndex(x=>x.userId===r.userId)+1;
+            return`<div class="lb-row lb-rival-pick" data-action="lb-pick-rival" data-uid="${r.userId}">
+            <div class="lb-avatar" style="background:var(--srf3);color:var(--tx2);">${esc((r.name||'?')[0].toUpperCase())}</div>
             <div class="lb-info">
               <div class="lb-name">${esc(r.name)}</div>
-              <div class="lb-sub">Yr ${r.year||'?'} · ${fmtDur(r.totalMins||0)} total · ${r.streak||0}🔥</div>
+              <div class="lb-sub">#${rRank} · ${fmtDur(r.weekMins||0)} this week · ${r.streak||0}d streak</div>
             </div>
             <div class="lb-challenge">Challenge →</div>
-          </div>`).join('')}
+          </div>`}).join('')}
         </div>
       </div>`;
     }
@@ -2896,29 +3212,28 @@ function renderLeaderboard(){
     if(!rival){S.lbRival=null;return renderH2H();}
 
     const modes=[['weekMins','Weekly study'],['totalMins','All-time'],['streak','Streak'],['avgScore','Test avg']];
+    const modeIcons={weekMins:'◷',totalMins:'∑',streak:'🔥',avgScore:'◈'};
 
     function makeBar(mv2,rv2){
       const total=(mv2||0)+(rv2||0);
       const mePct=total?Math.round(((mv2||0)/total)*100):50;
-      return`<div class="h2h-bar"><div class="h2h-bar-me" style="width:${mePct}%"></div></div>`;
+      return`<div class="h2h-bar"><div class="h2h-bar-me" data-bw="${mePct}" style="width:0%"></div></div>`;
     }
 
-    function getMyVal(key){
-      if(!me)return 0;
-      return me[key]||0;
-    }
+    function getMyVal(key){return me?me[key]||0:0;}
 
-    // Count wins
     let myWins=0,rivalWins=0;
     modes.forEach(([key])=>{
       const mv=getMyVal(key),rv=rival[key]||0;
       if(mv>rv)myWins++;else if(rv>mv)rivalWins++;
     });
+    const total=myWins+rivalWins;
+    const verdictCls=myWins>rivalWins?'win':rivalWins>myWins?'lose':'tie';
 
     return`
     <div class="h2h-header">
       <button class="h2h-back" data-action="lb-clear-rival">← Back</button>
-      <div class="h2h-score-pill">
+      <div class="h2h-score-pill h2h-score-${verdictCls}">
         <span class="h2h-score-me">${myWins}</span>
         <span class="h2h-score-sep">–</span>
         <span class="h2h-score-rival">${rivalWins}</span>
@@ -2926,24 +3241,29 @@ function renderLeaderboard(){
     </div>
     <div class="h2h-vs">
       <div class="h2h-player h2h-left">
-        <div class="h2h-avatar">${esc((me?.name||'You')[0])}</div>
+        <div class="h2h-avatar">${esc((me?.name||'You')[0].toUpperCase())}</div>
         <div class="h2h-pname">${esc(me?.name||'You')}</div>
+        <div class="h2h-pstat">${fmtDur(me?.weekMins||0)} / wk</div>
       </div>
-      <div class="h2h-versus">VS</div>
+      <div class="h2h-versus-wrap">
+        <div class="h2h-versus">VS</div>
+        <div class="h2h-verdict-mini">${myWins>rivalWins?'You lead':rivalWins>myWins?'They lead':'Tied'}</div>
+      </div>
       <div class="h2h-player h2h-right">
-        <div class="h2h-avatar h2h-rival-av">${esc((rival.name||'?')[0])}</div>
+        <div class="h2h-avatar h2h-rival-av">${esc((rival.name||'?')[0].toUpperCase())}</div>
         <div class="h2h-pname">${esc(rival.name||'Rival')}</div>
+        <div class="h2h-pstat">${fmtDur(rival.weekMins||0)} / wk</div>
       </div>
-    </div>
-    <div class="h2h-mode-bar">
-      ${modes.map(([k,l])=>`<div class="lb-sort-chip${S.lbH2hMode===k?' on':''}" data-action="lb-h2h-mode" data-key="${k}">${l}</div>`).join('')}
     </div>
     <div class="h2h-comparison">
       ${modes.map(([key,label])=>{
         const mv=getMyVal(key),rv=rival[key]||0;
         const winner=mv>rv?'me':rv>mv?'rival':'tie';
-        return`<div class="h2h-row${S.lbH2hMode===key?' h2h-active':''}">
-          <div class="h2h-label">${label}${winner==='me'?' ✓':winner==='rival'?' ✗':''}</div>
+        return`<div class="h2h-row h2h-${winner}">
+          <div class="h2h-row-top">
+            <span class="h2h-label"><span class="h2h-label-icon">${modeIcons[key]}</span>${label}</span>
+            <span class="h2h-winner-badge">${winner==='me'?'You win':winner==='rival'?'They win':'Tied'}</span>
+          </div>
           <div class="h2h-vals">
             <span class="h2h-v ${winner==='me'?'h2h-win':''}">${fmtLbVal({[key]:mv},key)}</span>
             ${makeBar(mv,rv)}
@@ -2954,11 +3274,190 @@ function renderLeaderboard(){
     </div>
     <div class="h2h-verdict">
       ${(()=>{
-        if(myWins>rivalWins)return`<span class="h2h-win-msg">You're winning ${myWins}–${rivalWins}! Keep it up 💪</span>`;
-        if(rivalWins>myWins)return`<span class="h2h-lose-msg">${esc(rival.name)} leads ${rivalWins}–${myWins} — time to grind 🔥</span>`;
-        return'<span class="h2h-tie-msg">All square — who breaks away first?</span>';
+        if(myWins>rivalWins)return`<div class="h2h-verdict-card h2h-verdict-win"><span class="h2h-verdict-emoji">💪</span><span>You're winning ${myWins}–${rivalWins}! Keep the pressure on.</span></div>`;
+        if(rivalWins>myWins)return`<div class="h2h-verdict-card h2h-verdict-lose"><span class="h2h-verdict-emoji">🔥</span><span>${esc(rival.name)} leads ${rivalWins}–${myWins} — time to grind.</span></div>`;
+        return`<div class="h2h-verdict-card h2h-verdict-tie"><span class="h2h-verdict-emoji">⚖️</span><span>All square — next session decides it.</span></div>`;
       })()}
     </div>`;
+  }
+
+  // ── Teams tab ──
+  function renderTeamsTab(){
+    const myTeams=S.lbTeams;
+    const myId=getLbUserId();
+
+    // Team vs team comparison
+    if(S.lbTeamVs&&S.lbTeamVs.length===2){
+      const tA=S.lbTeamData[S.lbTeamVs[0]];
+      const tB=S.lbTeamData[S.lbTeamVs[1]];
+      if(!tA||!tB){S.lbTeamVs=null;return renderTeamsTab();}
+
+      function teamAgg(team){
+        const mems=(team.members||[]).map(m=>rows.find(r=>r.userId===m.userId)).filter(Boolean);
+        const total=mems.reduce((a,r)=>a+(r.weekMins||0),0);
+        const avg=mems.length?Math.round(total/mems.length):0;
+        const bestStreak=mems.length?Math.max(...mems.map(r=>r.streak||0)):0;
+        const avgScore=mems.filter(r=>r.avgScore!=null).length?Math.round(mems.filter(r=>r.avgScore!=null).reduce((a,r)=>a+r.avgScore,0)/mems.filter(r=>r.avgScore!=null).length):null;
+        return{total,avg,bestStreak,avgScore,count:mems.length,active:mems.filter(r=>(r.weekMins||0)>0).length};
+      }
+
+      const agg={a:teamAgg(tA),b:teamAgg(tB)};
+      const metrics=[
+        {label:'Weekly total',va:fmtDur(agg.a.total),vb:fmtDur(agg.b.total),na:agg.a.total,nb:agg.b.total},
+        {label:'Avg per member',va:fmtDur(agg.a.avg),vb:fmtDur(agg.b.avg),na:agg.a.avg,nb:agg.b.avg},
+        {label:'Best streak',va:(agg.a.bestStreak||0)+'d',vb:(agg.b.bestStreak||0)+'d',na:agg.a.bestStreak,nb:agg.b.bestStreak},
+        {label:'Active this week',va:agg.a.active+'/'+agg.a.count,vb:agg.b.active+'/'+agg.b.count,na:agg.a.active/(agg.a.count||1),nb:agg.b.active/(agg.b.count||1)},
+      ];
+      if(agg.a.avgScore!=null||agg.b.avgScore!=null)metrics.push({label:'Avg test score',va:agg.a.avgScore!=null?agg.a.avgScore+'%':'—',vb:agg.b.avgScore!=null?agg.b.avgScore+'%':'—',na:agg.a.avgScore||0,nb:agg.b.avgScore||0});
+
+      let winsA=0,winsB=0;
+      metrics.forEach(m=>{if(m.na>m.nb)winsA++;else if(m.nb>m.na)winsB++;});
+      const vCls=winsA>winsB?'win':winsB>winsA?'lose':'tie';
+
+      return`
+      <div class="h2h-header">
+        <button class="h2h-back" data-action="team-clear-vs">← Back</button>
+        <div class="h2h-score-pill h2h-score-${vCls}">
+          <span class="h2h-score-me">${winsA}</span>
+          <span class="h2h-score-sep">–</span>
+          <span class="h2h-score-rival">${winsB}</span>
+        </div>
+      </div>
+      <div class="team-vs-header">
+        <div class="team-vs-side">
+          <div class="team-vs-icon">${esc(tA.name[0])}</div>
+          <div class="team-vs-name">${esc(tA.name)}</div>
+          <div class="team-vs-count">${agg.a.count} member${agg.a.count!==1?'s':''}</div>
+        </div>
+        <div class="h2h-versus-wrap"><div class="h2h-versus">VS</div></div>
+        <div class="team-vs-side">
+          <div class="team-vs-icon team-vs-icon-b">${esc(tB.name[0])}</div>
+          <div class="team-vs-name">${esc(tB.name)}</div>
+          <div class="team-vs-count">${agg.b.count} member${agg.b.count!==1?'s':''}</div>
+        </div>
+      </div>
+      <div class="h2h-comparison">
+        ${metrics.map(m=>{
+          const winner=m.na>m.nb?'me':m.nb>m.na?'rival':'tie';
+          const total=(m.na||0)+(m.nb||0);
+          const aPct=total?Math.round((m.na/total)*100):50;
+          return`<div class="h2h-row h2h-${winner}">
+            <div class="h2h-row-top">
+              <span class="h2h-label">${m.label}</span>
+              <span class="h2h-winner-badge">${winner==='me'?esc(tA.name):winner==='rival'?esc(tB.name):'Tied'}</span>
+            </div>
+            <div class="h2h-vals">
+              <span class="h2h-v ${winner==='me'?'h2h-win':''}">${m.va}</span>
+              <div class="h2h-bar"><div class="h2h-bar-me" data-bw="${aPct}" style="width:0%"></div></div>
+              <span class="h2h-v ${winner==='rival'?'h2h-win':''}">${m.vb}</span>
+            </div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+
+    // Single team detail view
+    if(S.lbTeamView){
+      const team=S.lbTeamData[S.lbTeamView];
+      if(!team){S.lbTeamView=null;return renderTeamsTab();}
+      const members=(team.members||[]).map(m=>{
+        const lb=rows.find(r=>r.userId===m.userId);
+        return{...m,weekMins:lb?.weekMins||0,totalMins:lb?.totalMins||0,streak:lb?.streak||0,avgScore:lb?.avgScore};
+      }).sort((a,b)=>(b.weekMins||0)-(a.weekMins||0));
+      const teamTotal=members.reduce((a,m)=>a+(m.weekMins||0),0);
+      const teamAvg=members.length?Math.round(teamTotal/members.length):0;
+      const bestMember=members[0];
+      const active=members.filter(m=>(m.weekMins||0)>0).length;
+      const isCreator=team.createdBy===myId;
+
+      return`
+      <div class="team-detail-header">
+        <button class="h2h-back" data-action="team-back">← Teams</button>
+        <div class="team-detail-actions">
+          <button class="team-share-btn" data-action="team-copy-code" data-code="${team.code}">Share code</button>
+          <button class="team-leave-btn" data-action="team-leave" data-id="${S.lbTeamView}">${isCreator&&members.length<=1?'Delete':'Leave'}</button>
+        </div>
+      </div>
+      <div class="team-hero">
+        <div class="team-hero-icon">${esc(team.name[0].toUpperCase())}</div>
+        <div class="team-hero-name">${esc(team.name)}</div>
+        <div class="team-hero-code">${team.code}</div>
+      </div>
+      <div class="team-stats-row">
+        <div class="team-stat"><div class="team-stat-v">${fmtDur(teamTotal)}</div><div class="team-stat-l">This week</div></div>
+        <div class="team-stat"><div class="team-stat-v">${fmtDur(teamAvg)}</div><div class="team-stat-l">Avg / member</div></div>
+        <div class="team-stat"><div class="team-stat-v">${members.length}<span style="font-size:11px;color:var(--tx3);">/10</span></div><div class="team-stat-l">${active} active</div></div>
+      </div>
+      <div class="sec" style="margin:16px 0 10px;"><span class="sec-lbl">Members</span></div>
+      <div class="lb-list">
+        ${members.map((m,i)=>{
+          const isMe=m.userId===myId;
+          const medals=['🥇','🥈','🥉'];
+          return`<div class="lb-row${isMe?' lb-me':''}">
+            <div class="lb-rank"><span class="lb-rank-num">${i<3?medals[i]:i+1}</span></div>
+            <div class="lb-avatar" style="background:${isMe?'var(--acc)':'var(--srf3)'};color:${isMe?'#fff':'var(--tx2)'};">${esc((m.name||'?')[0].toUpperCase())}</div>
+            <div class="lb-info">
+              <div class="lb-name">${esc(m.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
+              <div class="lb-sub">${m.streak||0}d streak · ${fmtDur(m.totalMins||0)} total</div>
+            </div>
+            <div class="lb-stat"><div class="lb-stat-val">${fmtDur(m.weekMins||0)}</div></div>
+          </div>`;
+        }).join('')}
+      </div>`;
+    }
+
+    // Teams list view
+    if(S.lbTeamLoading)return`<div class="lb-loading"><div class="lb-spinner"></div><div style="margin-top:12px;">Loading teams…</div></div>`;
+
+    const teamCards=myTeams.map(t=>{
+      const team=S.lbTeamData[t.id];
+      if(!team)return`<div class="team-card" data-action="team-view" data-id="${t.id}">
+        <div class="team-card-icon">${esc((t.name||'?')[0].toUpperCase())}</div>
+        <div class="team-card-info"><div class="team-card-name">${esc(t.name)}</div><div class="team-card-meta">Loading…</div></div>
+        <div class="team-card-arrow">→</div>
+      </div>`;
+      const mems=team.members||[];
+      const weekTotal=mems.reduce((a,m)=>{const lb=rows.find(r=>r.userId===m.userId);return a+(lb?.weekMins||0);},0);
+      const myLb=rows.find(r=>r.userId===myId);
+      const myRank=mems.map(m=>{const lb=rows.find(r=>r.userId===m.userId);return{userId:m.userId,wm:lb?.weekMins||0};}).sort((a,b)=>b.wm-a.wm).findIndex(x=>x.userId===myId)+1;
+      return`<div class="team-card" data-action="team-view" data-id="${t.id}">
+        <div class="team-card-icon">${esc(team.name[0].toUpperCase())}</div>
+        <div class="team-card-info">
+          <div class="team-card-name">${esc(team.name)}</div>
+          <div class="team-card-meta">${mems.length} member${mems.length!==1?'s':''} · ${fmtDur(weekTotal)} this week${myRank>0?' · You\'re #'+myRank:''}</div>
+        </div>
+        <div class="team-card-arrow">→</div>
+      </div>`;
+    }).join('');
+
+    // Compare button if 2+ teams
+    const canCompare=myTeams.length>=2;
+
+    return`
+    <div class="team-actions-bar">
+      <button class="team-action-btn" data-action="team-create">＋ Create</button>
+      <button class="team-action-btn team-action-join" data-action="team-join-prompt">Join</button>
+    </div>
+    ${myTeams.length?`
+      <div class="team-list">${teamCards}</div>
+      ${canCompare?`<div class="sec" style="margin:18px 0 10px;"><span class="sec-lbl">Compare</span></div>
+      <div class="team-compare-grid">
+        ${myTeams.map((t,i)=>myTeams.slice(i+1).map(t2=>{
+          const tA=S.lbTeamData[t.id];
+          const tB=S.lbTeamData[t2.id];
+          return`<div class="team-compare-row" data-action="team-vs" data-a="${t.id}" data-b="${t2.id}">
+            <span class="team-compare-name">${esc(tA?.name||t.name)}</span>
+            <span class="team-compare-vs">vs</span>
+            <span class="team-compare-name">${esc(tB?.name||t2.name)}</span>
+            <span class="team-compare-go">→</span>
+          </div>`;
+        }).join('')).join('')}
+      </div>`:''}
+    `:`<div class="team-empty">
+      <div class="team-empty-icon">👥</div>
+      <div class="team-empty-title">No teams yet</div>
+      <div class="team-empty-text">Create a team for your class and share the code, or join an existing one.</div>
+    </div>`}`;
   }
 
   return`
@@ -2966,12 +3465,13 @@ function renderLeaderboard(){
   <div class="lb-tabs">
     <div class="lb-tab${S.lbTab===0?' on':''}" data-action="lb-tab" data-tab="0">🏆 Rankings</div>
     <div class="lb-tab${S.lbTab===1?' on':''}" data-action="lb-tab" data-tab="1">⚔️ Head-to-Head</div>
+    <div class="lb-tab${S.lbTab===2?' on':''}" data-action="lb-tab" data-tab="2">👥 Teams</div>
   </div>
   <div class="lb-content">
-    ${S.lbTab===0?renderRankings():renderH2H()}
+    ${S.lbTab===0?renderRankings():S.lbTab===1?renderH2H():renderTeamsTab()}
   </div>
   <div class="lb-footer">
-    <button class="cpbtn" data-action="lb-refresh" style="width:100%;">↻ Refresh</button>
+    <button class="cpbtn" data-action="lb-refresh" style="width:100%;">↻ Refresh leaderboard</button>
   </div>`;
 }
 
@@ -3021,7 +3521,46 @@ function renderModal(){
   if(S.modal==='log')return renderLogModal();
   if(S.modal==='addsubj')return renderAddSubjModal();
   if(S.modal==='logscore')return renderLogTestModal();
+  if(S.modal==='team-create')return renderTeamCreateModal();
+  if(S.modal==='team-join')return renderTeamJoinModal();
   return'';
+}
+
+function renderTeamCreateModal(){
+  return`<div class="overlay" data-action="close-modal-out">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="mhandle" data-action="close-modal"></div>
+        <div class="modal-close-x" data-action="close-modal">✕</div>
+        <div class="mtitle">Create a team</div>
+        <div class="msub">Make a team for your class, study group, or friends. Share the code to invite others.</div>
+      </div>
+      <div class="modal-body">
+        <div class="m-lbl">Team name</div>
+        <input type="text" id="team-name-input" class="team-input" placeholder="e.g. Chem 1, 12ENG-A, Study Squad" maxlength="30" autofocus>
+        <div class="team-input-hint">Keep it short — everyone will see this name.</div>
+        <button class="m-submit" data-action="team-create-submit" style="margin-top:20px;">Create team</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+function renderTeamJoinModal(){
+  return`<div class="overlay" data-action="close-modal-out">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="mhandle" data-action="close-modal"></div>
+        <div class="modal-close-x" data-action="close-modal">✕</div>
+        <div class="mtitle">Join a team</div>
+        <div class="msub">Enter the 6-character code from your team creator.</div>
+      </div>
+      <div class="modal-body">
+        <div class="m-lbl">Team code</div>
+        <input type="text" id="team-code-input" class="team-input team-code-field" placeholder="ABC123" maxlength="6" autofocus style="text-transform:uppercase;letter-spacing:.2em;text-align:center;font-size:22px;">
+        <button class="m-submit" data-action="team-join-submit" style="margin-top:20px;">Join team</button>
+      </div>
+    </div>
+  </div>`;
 }
 
 function renderLogTestModal(){
@@ -3393,17 +3932,33 @@ const A={
     S.view='leaderboard';S.modal=null;S.moreMenu=false;
     if(!S.lbData&&!S.lbLoading){
       S.lbLoading=true;render();
-      lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;if(S.view==='leaderboard')render();});
+      lbPush().then(()=>lbGetCached(true)).then(d=>{
+        S.lbData=d;S.lbLoading=false;
+        // Pre-fetch teams if user has any
+        if(S.lbTeams.length&&!Object.keys(S.lbTeamData).length)fetchAllUserTeams().then(()=>{if(S.view==='leaderboard')render();});
+        if(S.view==='leaderboard')render();
+      });
     } else render();
   },
-  'lb-tab':(btn)=>{S.lbTab=parseInt(btn.dataset.tab);render();},
+  'lb-tab':(btn)=>{
+    S.lbTab=parseInt(btn.dataset.tab);
+    S.lbTeamView=null;S.lbTeamVs=null;
+    if(S.lbTab===2&&S.lbTeams.length&&!Object.keys(S.lbTeamData).length){
+      S.lbTeamLoading=true;render();
+      fetchAllUserTeams().then(()=>{S.lbTeamLoading=false;render();});
+    }else render();
+  },
   'lb-sort':(btn)=>{S.lbSort=btn.dataset.key;render();},
   'lb-pick-rival':(btn)=>{S.lbRival=btn.dataset.uid;S.lbTab=1;render();},
   'lb-clear-rival':()=>{S.lbRival=null;render();},
   'lb-h2h-mode':(btn)=>{S.lbH2hMode=btn.dataset.key;render();},
   'lb-refresh':()=>{
     S.lbLoading=true;render();
-    lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;render();showToast('Leaderboard updated','🏆');});
+    lbPush().then(()=>lbGetCached(true)).then(async d=>{
+      S.lbData=d;
+      if(S.lbTeams.length)await fetchAllUserTeams();
+      S.lbLoading=false;render();showToast('Leaderboard updated','🏆');
+    });
   },
   'lb-del-entry':async(btn)=>{
     const uid=btn.dataset.uid;if(!uid)return;
@@ -3416,6 +3971,75 @@ const A={
       render();showToast('Duplicate removed','✕');
     }catch(e){showToast('Failed to delete','!');}
   },
+
+  // ── Teams ──
+  'team-create':()=>{
+    S.modal='team-create';document.body.classList.add('modal-open');render();
+  },
+  'team-create-submit':async()=>{
+    const nameEl=document.getElementById('team-name-input');
+    const name=(nameEl?.value||'').trim();
+    if(!name){showToast('Enter a team name','!');return;}
+    if(name.length>30){showToast('Name too long (max 30)','!');return;}
+    const btn=document.querySelector('[data-action="team-create-submit"]');
+    if(btn){btn.disabled=true;btn.textContent='Creating…';}
+    const team=await createTeam(name);
+    if(team){
+      S.modal=null;document.body.classList.remove('modal-open');
+      S.lbTab=2;S.lbTeamView=team.id;
+      render();showToast('Team created! Code: '+team.code,'👥');
+    }else{
+      showToast('Failed to create team','!');
+      if(btn){btn.disabled=false;btn.textContent='Create team';}
+    }
+  },
+  'team-join-prompt':()=>{
+    S.modal='team-join';document.body.classList.add('modal-open');render();
+  },
+  'team-join-submit':async()=>{
+    const codeEl=document.getElementById('team-code-input');
+    const code=(codeEl?.value||'').trim().toUpperCase();
+    if(!code||code.length!==6){showToast('Enter a 6-character team code','!');return;}
+    const btn=document.querySelector('[data-action="team-join-submit"]');
+    if(btn){btn.disabled=true;btn.textContent='Joining…';}
+    const result=await joinTeam(code);
+    if(result.ok){
+      S.modal=null;document.body.classList.remove('modal-open');
+      S.lbTab=2;S.lbTeamView=result.team.id;
+      render();showToast('Joined '+result.team.name+'!','👥');
+    }else{
+      showToast(result.msg||'Failed to join','!');
+      if(btn){btn.disabled=false;btn.textContent='Join team';}
+    }
+  },
+  'team-view':async(btn)=>{
+    const id=btn.dataset.id;if(!id)return;
+    S.lbTeamView=id;
+    if(!S.lbTeamData[id]){
+      S.lbTeamLoading=true;render();
+      await fetchTeam(id);
+      S.lbTeamLoading=false;
+    }
+    render();
+  },
+  'team-back':()=>{S.lbTeamView=null;S.lbTeamVs=null;render();},
+  'team-copy-code':(btn)=>{
+    const code=btn.dataset.code;
+    navigator.clipboard?.writeText(code).then(()=>showToast('Code copied: '+code,'📋')).catch(()=>showToast(code,'📋'));
+  },
+  'team-leave':async(btn)=>{
+    const id=btn.dataset.id;if(!id)return;
+    const team=S.lbTeamData[id];
+    const msg=team?.createdBy===getLbUserId()&&(team.members||[]).length<=1?'Delete this team?':'Leave this team?';
+    if(!confirm(msg))return;
+    const ok=await leaveTeam(id);
+    if(ok){S.lbTeamView=null;render();showToast('Left team','👥');}
+    else showToast('Failed to leave team','!');
+  },
+  'team-vs':(btn)=>{
+    S.lbTeamVs=[btn.dataset.a,btn.dataset.b];render();
+  },
+  'team-clear-vs':()=>{S.lbTeamVs=null;render();},
 
   'tt-tab':(btn)=>{S.ttTab=parseInt(btn.dataset.tab);render();},
 
