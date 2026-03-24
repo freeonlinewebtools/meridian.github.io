@@ -580,6 +580,20 @@ function buildLbStats(data){
   const tests=data.tests||[];
   const scoredTests=tests.filter(t=>t.score!=null&&t.outOf>0);
   const avgScore=scoredTests.length?Math.round(scoredTests.reduce((a,t)=>a+(t.score/t.outOf)*100,0)/scoredTests.length):null;
+  // Per-subject stats for team filtering
+  const subs=data.subjects||[];
+  const mon=weekMon(),td=today();
+  const subjectStats={};
+  subs.forEach(sub=>{
+    const subSess=sess.filter(s=>s.subject===sub.id);
+    const subTests=tests.filter(t=>t.subject===sub.id&&t.score!=null&&t.outOf>0);
+    const wm=subSess.filter(s=>s.date>=mon&&s.date<=td).reduce((a,s)=>a+s.duration,0);
+    const tm=subSess.reduce((a,s)=>a+s.duration,0);
+    const avg=subTests.length?Math.round(subTests.reduce((a,t)=>a+(t.score/t.outOf)*100,0)/subTests.length):null;
+    if(wm>0||tm>0||subTests.length>0){
+      subjectStats[sub.name]={weekMins:wm,totalMins:tm,avgScore:avg,testCount:subTests.length,sessCount:subSess.length};
+    }
+  });
   return{
     name:data.name||'Anonymous',
     totalMins:totalMins(sess),
@@ -590,7 +604,8 @@ function buildLbStats(data){
     avgScore,
     testCount:scoredTests.length,
     year:data.year||11,
-    lastUpdated:Date.now()
+    lastUpdated:Date.now(),
+    subjectStats
   };
 }
 
@@ -632,20 +647,30 @@ function genTeamCode(){
 
 function saveTeamsList(){localStorage.setItem('mer_teams',JSON.stringify(S.lbTeams));}
 
-async function createTeam(name){
+async function createTeam(name,subject){
   const db=await getFirestoreDb();if(!db)return null;
   const{doc,setDoc,collection:col}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
   const userId=getLbUserId();
   const userName=S.data?.name||'Anonymous';
   const code=genTeamCode();
   const teamId=uid();
-  const team={name,code,createdBy:userId,createdAt:Date.now(),members:[{userId,name:userName,joinedAt:Date.now()}]};
+  const team={name,code,subject:subject||null,createdBy:userId,createdAt:Date.now(),members:[{userId,name:userName,joinedAt:Date.now()}]};
   try{
     await setDoc(doc(db,'teams',teamId),team);
     S.lbTeams.push({id:teamId,name,code});saveTeamsList();
     S.lbTeamData[teamId]={...team};
     return{id:teamId,...team};
   }catch(e){console.warn('Create team failed:',e);return null;}
+}
+
+async function updateTeamSubject(teamId,subject){
+  const db=await getFirestoreDb();if(!db)return false;
+  const{doc,updateDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  try{
+    await updateDoc(doc(db,'teams',teamId),{subject:subject||null});
+    if(S.lbTeamData[teamId])S.lbTeamData[teamId].subject=subject||null;
+    return true;
+  }catch(e){console.warn('Update team subject failed:',e);return false;}
 }
 
 async function joinTeam(code){
@@ -2943,6 +2968,7 @@ function renderSettings(){
     <div class="sset-t">◉ Account</div>
     <div class="srow"><span class="srow-l">Name</span><input type="text" id="sname" class="srow-v" value="${esc(name)}" maxlength="30" style="text-align:right;border:none;background:transparent;outline:none;font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);"></div>
     <div class="srow"><span class="srow-l">Year</span><select id="syear" style="font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);border:none;background:transparent;outline:none;cursor:pointer;appearance:none;">${[7,8,9,10,11,12].map(y=>`<option value="${y}"${y===year?' selected':''}>Year ${y}</option>`).join('')}</select></div>
+    <div class="srow"><span class="srow-l">PIN</span><input type="password" id="spin" class="srow-v" value="${esc(S.data.pin||'')}" maxlength="4" inputmode="numeric" placeholder="••••" style="text-align:right;border:none;background:transparent;outline:none;font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);width:60px;letter-spacing:.15em;"></div>
     <div class="srow"><span class="srow-l">Exam target</span><span class="srow-v">${getExamDate(year).name} · ${Math.max(0,daysUntil(getExamDate(year).date))}d</span></div>
     <div class="settings-stats-row">
       <div class="settings-stat"><div class="settings-stat-v">${sessions.filter(s=>s.subject!=='grace').length}</div><div class="settings-stat-l">sessions</div></div>
@@ -3293,12 +3319,24 @@ function renderLeaderboard(){
       if(!tA||!tB){S.lbTeamVs=null;return renderTeamsTab();}
 
       function teamAgg(team){
+        const subj=team.subject||null;
         const mems=(team.members||[]).map(m=>rows.find(r=>r.userId===m.userId)).filter(Boolean);
-        const total=mems.reduce((a,r)=>a+(r.weekMins||0),0);
-        const avg=mems.length?Math.round(total/mems.length):0;
-        const bestStreak=mems.length?Math.max(...mems.map(r=>r.streak||0)):0;
-        const avgScore=mems.filter(r=>r.avgScore!=null).length?Math.round(mems.filter(r=>r.avgScore!=null).reduce((a,r)=>a+r.avgScore,0)/mems.filter(r=>r.avgScore!=null).length):null;
-        return{total,avg,bestStreak,avgScore,count:mems.length,active:mems.filter(r=>(r.weekMins||0)>0).length};
+        let total,avg,bestStreak,avgScore,scored;
+        if(subj){
+          // Subject-filtered stats
+          total=mems.reduce((a,r)=>a+((r.subjectStats?.[subj]?.weekMins)||0),0);
+          avg=mems.length?Math.round(total/mems.length):0;
+          bestStreak=mems.length?Math.max(...mems.map(r=>r.streak||0)):0;
+          scored=mems.filter(r=>r.subjectStats?.[subj]?.avgScore!=null);
+          avgScore=scored.length?Math.round(scored.reduce((a,r)=>a+r.subjectStats[subj].avgScore,0)/scored.length):null;
+        }else{
+          total=mems.reduce((a,r)=>a+(r.weekMins||0),0);
+          avg=mems.length?Math.round(total/mems.length):0;
+          bestStreak=mems.length?Math.max(...mems.map(r=>r.streak||0)):0;
+          scored=mems.filter(r=>r.avgScore!=null);
+          avgScore=scored.length?Math.round(scored.reduce((a,r)=>a+r.avgScore,0)/scored.length):null;
+        }
+        return{total,avg,bestStreak,avgScore,count:mems.length,active:mems.filter(r=>(subj?(r.subjectStats?.[subj]?.weekMins||0):(r.weekMins||0))>0).length};
       }
 
       const agg={a:teamAgg(tA),b:teamAgg(tB)};
@@ -3360,15 +3398,27 @@ function renderLeaderboard(){
     if(S.lbTeamView){
       const team=S.lbTeamData[S.lbTeamView];
       if(!team){S.lbTeamView=null;return renderTeamsTab();}
+      const subj=team.subject||null; // e.g. "Chemistry"
+      const isCreator=team.createdBy===myId;
+
+      // Build member stats — subject-filtered if team has a subject
       const members=(team.members||[]).map(m=>{
         const lb=rows.find(r=>r.userId===m.userId);
-        return{...m,weekMins:lb?.weekMins||0,totalMins:lb?.totalMins||0,streak:lb?.streak||0,avgScore:lb?.avgScore};
+        if(subj&&lb?.subjectStats?.[subj]){
+          const ss=lb.subjectStats[subj];
+          return{...m,weekMins:ss.weekMins||0,totalMins:ss.totalMins||0,avgScore:ss.avgScore,testCount:ss.testCount||0,sessCount:ss.sessCount||0,streak:lb?.streak||0};
+        }
+        return{...m,weekMins:lb?.weekMins||0,totalMins:lb?.totalMins||0,streak:lb?.streak||0,avgScore:lb?.avgScore,testCount:lb?.testCount||0,sessCount:lb?.sessCount||0};
       }).sort((a,b)=>(b.weekMins||0)-(a.weekMins||0));
+
       const teamTotal=members.reduce((a,m)=>a+(m.weekMins||0),0);
       const teamAvg=members.length?Math.round(teamTotal/members.length):0;
-      const bestMember=members[0];
       const active=members.filter(m=>(m.weekMins||0)>0).length;
-      const isCreator=team.createdBy===myId;
+      const scoredMembers=members.filter(m=>m.avgScore!=null);
+      const teamAvgScore=scoredMembers.length?Math.round(scoredMembers.reduce((a,m)=>a+m.avgScore,0)/scoredMembers.length):null;
+
+      // Subject picker for editing (only creator)
+      const allSubNames=[...new Set([...(S.data?.subjects||[]).map(s=>s.name),...ALL_PRESET_SUBS.map(s=>s.name)])].sort();
 
       return`
       <div class="team-detail-header">
@@ -3381,24 +3431,36 @@ function renderLeaderboard(){
       <div class="team-hero">
         <div class="team-hero-icon">${esc(team.name[0].toUpperCase())}</div>
         <div class="team-hero-name">${esc(team.name)}</div>
+        ${subj?`<div class="team-hero-subj">${esc(subj)}</div>`:''}
         <div class="team-hero-code">${team.code}</div>
       </div>
       <div class="team-stats-row">
-        <div class="team-stat"><div class="team-stat-v">${fmtDur(teamTotal)}</div><div class="team-stat-l">This week</div></div>
-        <div class="team-stat"><div class="team-stat-v">${fmtDur(teamAvg)}</div><div class="team-stat-l">Avg / member</div></div>
+        <div class="team-stat"><div class="team-stat-v">${fmtDur(teamTotal)}</div><div class="team-stat-l">${subj?esc(subj)+' this wk':'This week'}</div></div>
+        ${teamAvgScore!=null?`<div class="team-stat"><div class="team-stat-v">${teamAvgScore}%</div><div class="team-stat-l">Avg score</div></div>`
+        :`<div class="team-stat"><div class="team-stat-v">${fmtDur(teamAvg)}</div><div class="team-stat-l">Avg / member</div></div>`}
         <div class="team-stat"><div class="team-stat-v">${members.length}<span style="font-size:11px;color:var(--tx3);">/10</span></div><div class="team-stat-l">${active} active</div></div>
       </div>
-      <div class="sec" style="margin:16px 0 10px;"><span class="sec-lbl">Members</span></div>
+      ${isCreator?`<div class="team-subj-section">
+        <div class="sec" style="margin:16px 0 8px;"><span class="sec-lbl">Subject</span><span class="sec-link" data-action="team-toggle-subj">${S._editTeamSubj?'Done':'Change'}</span></div>
+        ${S._editTeamSubj?`<div class="team-subj-picker">
+          <div class="team-subj-chip${!subj?' on':''}" data-action="team-set-subj" data-subj="" data-tid="${S.lbTeamView}">Any</div>
+          ${allSubNames.map(n=>`<div class="team-subj-chip${subj===n?' on':''}" data-action="team-set-subj" data-subj="${esc(n)}" data-tid="${S.lbTeamView}">${esc(n)}</div>`).join('')}
+        </div>`:`<div class="team-subj-current">${subj?esc(subj):'Any subject — stats show overall totals'}</div>`}
+      </div>`:''}
+      <div class="sec" style="margin:16px 0 10px;"><span class="sec-lbl">Rankings${subj?' — '+esc(subj):''}</span></div>
       <div class="lb-list">
         ${members.map((m,i)=>{
           const isMe=m.userId===myId;
           const medals=['🥇','🥈','🥉'];
+          const secondary=subj
+            ?(m.avgScore!=null?m.avgScore+'% avg · ':'')+fmtDur(m.totalMins||0)+' total'
+            :(m.streak||0)+'d streak · '+fmtDur(m.totalMins||0)+' total';
           return`<div class="lb-row${isMe?' lb-me':''}">
             <div class="lb-rank"><span class="lb-rank-num">${i<3?medals[i]:i+1}</span></div>
             <div class="lb-avatar" style="background:${isMe?'var(--acc)':'var(--srf3)'};color:${isMe?'#fff':'var(--tx2)'};">${esc((m.name||'?')[0].toUpperCase())}</div>
             <div class="lb-info">
               <div class="lb-name">${esc(m.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
-              <div class="lb-sub">${m.streak||0}d streak · ${fmtDur(m.totalMins||0)} total</div>
+              <div class="lb-sub">${secondary}</div>
             </div>
             <div class="lb-stat"><div class="lb-stat-val">${fmtDur(m.weekMins||0)}</div></div>
           </div>`;
@@ -3417,13 +3479,19 @@ function renderLeaderboard(){
         <div class="team-card-arrow">→</div>
       </div>`;
       const mems=team.members||[];
-      const weekTotal=mems.reduce((a,m)=>{const lb=rows.find(r=>r.userId===m.userId);return a+(lb?.weekMins||0);},0);
-      const myLb=rows.find(r=>r.userId===myId);
-      const myRank=mems.map(m=>{const lb=rows.find(r=>r.userId===m.userId);return{userId:m.userId,wm:lb?.weekMins||0};}).sort((a,b)=>b.wm-a.wm).findIndex(x=>x.userId===myId)+1;
+      const tSubj=team.subject||null;
+      const weekTotal=mems.reduce((a,m)=>{
+        const lb=rows.find(r=>r.userId===m.userId);
+        return a+(tSubj?(lb?.subjectStats?.[tSubj]?.weekMins||0):(lb?.weekMins||0));
+      },0);
+      const myRank=mems.map(m=>{
+        const lb=rows.find(r=>r.userId===m.userId);
+        return{userId:m.userId,wm:tSubj?(lb?.subjectStats?.[tSubj]?.weekMins||0):(lb?.weekMins||0)};
+      }).sort((a,b)=>b.wm-a.wm).findIndex(x=>x.userId===myId)+1;
       return`<div class="team-card" data-action="team-view" data-id="${t.id}">
         <div class="team-card-icon">${esc(team.name[0].toUpperCase())}</div>
         <div class="team-card-info">
-          <div class="team-card-name">${esc(team.name)}</div>
+          <div class="team-card-name">${esc(team.name)}${tSubj?` <span class="team-card-subj">${esc(tSubj)}</span>`:''}</div>
           <div class="team-card-meta">${mems.length} member${mems.length!==1?'s':''} · ${fmtDur(weekTotal)} this week${myRank>0?' · You\'re #'+myRank:''}</div>
         </div>
         <div class="team-card-arrow">→</div>
@@ -3527,18 +3595,26 @@ function renderModal(){
 }
 
 function renderTeamCreateModal(){
+  // Collect all known subject names from user's subjects + all presets
+  const allSubNames=[...new Set([...(S.data?.subjects||[]).map(s=>s.name),...ALL_PRESET_SUBS.map(s=>s.name)])].sort();
   return`<div class="overlay" data-action="close-modal-out">
     <div class="modal">
       <div class="modal-header">
         <div class="mhandle" data-action="close-modal"></div>
         <div class="modal-close-x" data-action="close-modal">✕</div>
         <div class="mtitle">Create a team</div>
-        <div class="msub">Make a team for your class, study group, or friends. Share the code to invite others.</div>
+        <div class="msub">Make a team for your class and compete on a specific subject.</div>
       </div>
       <div class="modal-body">
         <div class="m-lbl">Team name</div>
         <input type="text" id="team-name-input" class="team-input" placeholder="e.g. Chem 1, 12ENG-A, Study Squad" maxlength="30" autofocus>
         <div class="team-input-hint">Keep it short — everyone will see this name.</div>
+        <div class="m-lbl" style="margin-top:16px;">Subject <span style="font-weight:300;color:var(--tx3);">— optional</span></div>
+        <div class="team-subj-picker">
+          <div class="team-subj-chip${!S._teamSubject?' on':''}" data-action="team-pick-subj" data-subj="">Any</div>
+          ${allSubNames.map(n=>`<div class="team-subj-chip${S._teamSubject===n?' on':''}" data-action="team-pick-subj" data-subj="${esc(n)}">${esc(n)}</div>`).join('')}
+        </div>
+        <div class="team-input-hint">Pick a subject to compare ${(S.data?.subjects||[]).length?'scores and study time for that subject only':'class performance'}.</div>
         <button class="m-submit" data-action="team-create-submit" style="margin-top:20px;">Create team</button>
       </div>
     </div>
@@ -3699,14 +3775,13 @@ function renderLogModal(){
           }).join('')}
         </div>
 
-        ${selSub&&topics.length?`
-        <div class="mlbl">Topic <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional</span></div>
-        <div class="topic-section">
-          <div class="topic-scroll" id="topic-scroll">
-            <div class="topic-chip${!S.logTopic?' on':''}" data-action="sel-topic" data-topic="">— Any</div>
-            ${topics.map(t=>`<div class="topic-chip${S.logTopic===t?' on':''}" data-action="sel-topic" data-topic="${t}">${t}</div>`).join('')}
-          </div>
-        </div>`:''}
+          ${selSub&&topics.length?`
+            <div class="mlbl">Topic <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional</span></div>
+            <div class="topic-grid">
+              <div class="topic-chip${!S.logTopic?' on':''}" data-action="sel-topic" data-topic="">— Any</div>
+              ${topics.map(t=>`<div class="topic-chip${S.logTopic===t?' on':''}" data-action="sel-topic" data-topic="${t}">${t}</div>`).join('')}
+            </div>
+          `:''}
 
         <div class="mlbl">Duration</div>
         <div class="dur-grid">
@@ -3976,6 +4051,10 @@ const A={
   'team-create':()=>{
     S.modal='team-create';document.body.classList.add('modal-open');render();
   },
+  'team-pick-subj':(btn)=>{
+    S._teamSubject=btn.dataset.subj||null;
+    document.querySelectorAll('.team-subj-chip').forEach(el=>el.classList.toggle('on',(el.dataset.subj||'')===(S._teamSubject||'')));
+  },
   'team-create-submit':async()=>{
     const nameEl=document.getElementById('team-name-input');
     const name=(nameEl?.value||'').trim();
@@ -3983,7 +4062,8 @@ const A={
     if(name.length>30){showToast('Name too long (max 30)','!');return;}
     const btn=document.querySelector('[data-action="team-create-submit"]');
     if(btn){btn.disabled=true;btn.textContent='Creating…';}
-    const team=await createTeam(name);
+    const team=await createTeam(name,S._teamSubject||null);
+    S._teamSubject=null;
     if(team){
       S.modal=null;document.body.classList.remove('modal-open');
       S.lbTab=2;S.lbTeamView=team.id;
@@ -4035,6 +4115,21 @@ const A={
     const ok=await leaveTeam(id);
     if(ok){S.lbTeamView=null;render();showToast('Left team','👥');}
     else showToast('Failed to leave team','!');
+  },
+  'team-toggle-subj':()=>{S._editTeamSubj=!S._editTeamSubj;render();},
+  'team-set-subj':async(btn)=>{
+    const subj=btn.dataset.subj||null;
+    const tid=btn.dataset.tid;
+    if(!tid)return;
+    const ok=await updateTeamSubject(tid,subj);
+    if(ok){
+      S._editTeamSubj=false;
+      // Update local team list name reference
+      const local=S.lbTeams.find(t=>t.id===tid);
+      if(local)local.subject=subj;
+      saveTeamsList();
+      render();showToast(subj?'Subject set to '+subj:'Subject cleared','✓');
+    }else showToast('Failed to update subject','!');
   },
   'team-vs':(btn)=>{
     S.lbTeamVs=[btn.dataset.a,btn.dataset.b];render();
@@ -4400,7 +4495,12 @@ const A={
   'save-account':()=>{
     const name=document.getElementById('sname')?.value?.trim();
     const year=parseInt(document.getElementById('syear')?.value||'11');
+    const pin=document.getElementById('spin')?.value?.trim();
     if(!name)return;
+    if(pin!==undefined&&pin!==''){
+      if(pin.length!==4||!/^\d{4}$/.test(pin)){showToast('PIN must be 4 digits','!');return;}
+      S.data.pin=pin;
+    }
     S.data.name=name;S.data.year=year;saveLocal(S.data);triggerSync();triggerLbPush();render();showToast('Settings saved.','✓');
   },
 

@@ -621,6 +621,18 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   padding-bottom:6px;scrollbar-width:none;
   flex-wrap:nowrap;
 }
+
+/* Add this at the end or near other modal/topic styles */
+.topic-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+  gap: 7px;
+  margin-bottom: 14px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-bottom: 2px;
+}
+
 .topic-scroll::-webkit-scrollbar{display:none;}
 .topic-chip{
   padding:6px 13px;white-space:nowrap;
@@ -874,6 +886,15 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
   width:100%;max-height:93vh;
   overflow-y:auto;
   animation:sUp .28s cubic-bezier(.32,.72,0,1);
+}
+.modal-body {
+  overflow-y: auto;
+  max-height: 70vh;
+  /* Optional: add padding if needed */
+}
+.sub-chips-grid,
+.topic-grid {
+  margin-bottom: 10px;
 }
 @media(min-width:600px){
   .modal{
@@ -4646,6 +4667,39 @@ body.modal-open .content{overflow:hidden!important;pointer-events:none;}
 .team-input-hint{font-size:11.5px;color:var(--tx3);margin-top:8px;}
 .team-code-field{
   font-family:'DM Mono',monospace;font-weight:600;
+}
+
+/* Team subject picker */
+.team-subj-picker{
+  display:flex;flex-wrap:wrap;gap:6px;
+  max-height:180px;overflow-y:auto;
+  padding:2px 0;
+}
+.team-subj-chip{
+  padding:6px 12px;border-radius:8px;
+  font-size:12px;font-weight:400;
+  background:var(--srf);border:1.5px solid var(--bd);
+  color:var(--tx2);cursor:pointer;
+  transition:all .12s ease;white-space:nowrap;
+}
+.team-subj-chip:hover{border-color:var(--bdS);color:var(--tx);}
+.team-subj-chip.on{
+  background:var(--tx);border-color:var(--tx);color:var(--bg);
+  font-weight:500;
+}
+.team-hero-subj{
+  font-size:13px;color:var(--acc);font-weight:500;
+  margin-top:4px;
+}
+.team-subj-section{margin-bottom:4px;}
+.team-subj-current{
+  font-size:12.5px;color:var(--tx3);
+  padding:8px 0 4px;
+}
+.team-card-subj{
+  font-size:10px;font-weight:500;color:var(--acc);
+  background:var(--accL);padding:2px 6px;border-radius:4px;
+  vertical-align:middle;margin-left:4px;
 }
 
 /* Dark mode teams */
