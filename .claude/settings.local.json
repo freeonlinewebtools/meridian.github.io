@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "WebSearch",
+      "Bash(wc -l /c/Users/grrrp/OneDrive/Documents/Meridian/*.js /c/Users/grrrp/OneDrive/Documents/Meridian/*.css)"
+    ]
+  }
+}

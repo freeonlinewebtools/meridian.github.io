@@ -4,62 +4,139 @@
 const KEY='mer_v4', SKEY='mer_sync', AUTH_KEY='mer_authed';
 const IS_LOCAL = location.hostname==='localhost'||location.hostname==='127.0.0.1'||location.hostname==='0.0.0.0'||location.protocol==='file:';
 
-// Subject topics — pre-loaded per subject code
-const SUBJECT_TOPICS = {
-  '11MAX2': ['Permutations','Combinations','Binomial Theorem','Pascal\'s Triangle','Proof by Induction','Mathematical Induction','Counting Techniques','Pigeonhole Principle'],
-  '11MAE2': ['Functions','Trigonometry','Differentiation','Integration','Polynomials','Logarithms','Exponentials','Sequences & Series','Financial Maths','Statistics'],
-  '11CHE4': ['Atomic Structure','Chemical Bonding','Stoichiometry','Gases','Solutions','Equilibrium','Acids & Bases','Electrochemistry','Organic Chemistry','Thermodynamics'],
-  '11BIO1': ['Cell Biology','Genetics','Evolution','Ecology','Human Biology','Classification','Biochemistry','Reproduction','Nervous System','Immune System'],
-  '11PHY6': ['Kinematics','Dynamics','Forces','Energy','Waves','Thermodynamics','Electricity','Magnetism','Nuclear Physics','Relativity'],
-  '11ENA5b':['Essay Writing','Creative Writing','Close Reading','Textual Analysis','Module A','Module B','Module C','Common Module','Belonging','Discovery'],
-  '11EST3': ['Engineering Principles','Design Process','Structures','Materials','Mechanisms','Electronics','Hydraulics','CAD','Project Management','Testing'],
-  '_hms':    ['Hospitality','Food Safety','Nutrition','Menu Planning','Kitchen Operations','Food Preparation','Catering','Events','Service Styles','Industry Knowledge'],
-  '_sac':    ['Personal & Social Identity','Intercultural Communication','Social Inclusion & Exclusion','Belief Systems','Micro & Macro Worlds','Social & Cultural Continuity & Change','PIP','Research Methods','Cross-Cultural Comparisons','Social Conformity & Nonconformity'],
-  '_bus':    ['Operations','Marketing','Finance','Human Resources','Business Planning','Global Business','Nature of Business','Business Management'],
-  '_legal':  ['Crime','Human Rights','Family','Workplace','Shelter','World Order','Legal Processes','Law Reform'],
-  '_geo':    ['Biophysical Interactions','Ecosystems at Risk','Urban Places','People & Economic Activity','Megacities','Development Geography'],
-  '_drama':  ['Australian Drama','Studies in Drama','Group Performance','Individual Project','Theatrical Traditions','Playbuilding'],
-  '_cafs':   ['Research Methodology','Groups in Context','Parenting & Caring','Social Impact of Technology','Individuals & Work','Community & Family Structures'],
-  '_sor':    ['Religion & Belief Systems','Religious Tradition Depth Study','Religion & Peace','Religion & Ethics','Ritual','Sacred Texts'],
-  '_dt':     ['Design & Technology Projects','Innovation & Emerging Tech','Designing & Producing','Project Management','Sketching & CAD','Material Properties'],
-  '_food':   ['Food Availability','Nutrition','Food Quality','The Australian Food Industry','Food Manufacture','Food Product Development'],
-  '_txtl':   ['Design','Properties of Textiles','The Australian Textiles Industry','Colouration','Construction','Textile Arts'],
-  '_ag':     ['Farm Case Study','Plant Production','Animal Production','Farm Product Study','Elective'],
-  '_lang':   ['Prescribed Text','Listening','Reading','Writing','Speaking','Grammar','Vocabulary','Culture'],
-  '_esci':   ['Earth\'s Resources','Plate Tectonics','Hazards','Climate Science','Renewable Energy','The Carbon Cycle','Water','Atmosphere'],
-  '_inv':    ['Cause & Effect','Scientific Models','Theories & Laws','Science & Technology','Practical Investigations'],
-  // Generic fallbacks by subject name keywords
-  '_math':   ['Algebra','Calculus','Trigonometry','Statistics','Proof','Functions','Series','Vectors','Complex Numbers','Geometry'],
-  '_science':['Theory','Practical','Lab Report','Equations','Diagrams','Module Content','Past Papers','Practice Questions'],
-  '_english':['Essay','Close Study','Analysis','Creative','Module A','Module B','Module C','Techniques','Themes'],
-  '_default':['Revision','New Content','Practice Questions','Past Papers','Summary Notes','Concept Review','Problem Sets','Exam Prep'],
+// Subject modules — per subject code, each module has inquiry questions
+const SUBJECT_MODULES = {
+  '11PHY6': [
+    {name:'Module 1 — Kinematics', iqs:['IQ: How is the motion of an object moving in a straight line described and predicted?','IQ: How is the motion of an object that changes its direction of movement on a plane described?']},
+    {name:'Module 2 — Dynamics', iqs:['IQ: How are forces produced between objects and what effects do forces produce?','IQ: How does the net force on an object determine the motion of the object?']},
+    {name:'Module 3 — Waves & Thermodynamics', iqs:['IQ: What are the properties of all waves and wave motion?','IQ: How do thermodynamic principles apply in the real world?']},
+    {name:'Module 4 — Electricity & Magnetism', iqs:['IQ: How do charged particles interact with electric and magnetic fields?','IQ: How do the processes of the transfer and transformation of energy occur in electric circuits?','IQ: How does magnetism interact with electricity?']},
+    {name:'Module 5 — Advanced Mechanics', iqs:['IQ: How can models that are used to explain projectile motion be used to analyse and make predictions?','IQ: Why do objects move in circles?','IQ: How does the force of gravity determine the motion of planets and satellites?']},
+    {name:'Module 6 — Electromagnetism', iqs:['IQ: What happens to stationary and moving charged particles when placed in an electric and/or magnetic field?','IQ: How are electric and magnetic fields related?','IQ: How has knowledge about the electromagnetic spectrum been applied?']},
+    {name:'Module 7 — The Nature of Light', iqs:['IQ: What is light?','IQ: How is light explained by the quantum model?']},
+    {name:'Module 8 — From the Universe to the Atom', iqs:['IQ: What evidence exists for the Big Bang theory?','IQ: How do the nuclei of atoms change?','IQ: How can the properties of the nucleus be used?']},
+  ],
+  '_physics': [
+    {name:'Module 1 — Kinematics', iqs:['IQ: How is the motion of an object moving in a straight line described and predicted?','IQ: How is the motion of an object that changes its direction of movement on a plane described?']},
+    {name:'Module 2 — Dynamics', iqs:['IQ: How are forces produced between objects and what effects do forces produce?','IQ: How does the net force on an object determine the motion of the object?']},
+    {name:'Module 3 — Waves & Thermodynamics', iqs:['IQ: What are the properties of all waves and wave motion?','IQ: How do thermodynamic principles apply in the real world?']},
+    {name:'Module 4 — Electricity & Magnetism', iqs:['IQ: How do charged particles interact with electric and magnetic fields?','IQ: How do the processes of the transfer and transformation of energy occur in electric circuits?','IQ: How does magnetism interact with electricity?']},
+    {name:'Module 5 — Advanced Mechanics', iqs:['IQ: How can models that are used to explain projectile motion be used to analyse and make predictions?','IQ: Why do objects move in circles?','IQ: How does the force of gravity determine the motion of planets and satellites?']},
+    {name:'Module 6 — Electromagnetism', iqs:['IQ: What happens to stationary and moving charged particles when placed in an electric and/or magnetic field?','IQ: How are electric and magnetic fields related?','IQ: How has knowledge about the electromagnetic spectrum been applied?']},
+    {name:'Module 7 — The Nature of Light', iqs:['IQ: What is light?','IQ: How is light explained by the quantum model?']},
+    {name:'Module 8 — From the Universe to the Atom', iqs:['IQ: What evidence exists for the Big Bang theory?','IQ: How do the nuclei of atoms change?','IQ: How can the properties of the nucleus be used?']},
+  ],
+  '11CHE4': [
+    {name:'Module 1 — Properties & Structure of Matter', iqs:['IQ: How do the properties of substances help us classify them?','IQ: How does the atomic structure of elements determine the identity and properties of elements and compounds?']},
+    {name:'Module 2 — Introduction to Quantitative Chemistry', iqs:['IQ: How are measurements made in chemistry?','IQ: How do we determine the mass and amounts in chemical reactions?']},
+    {name:'Module 3 — Reactive Chemistry', iqs:['IQ: What are the products of a chemical reaction?','IQ: What determines the rate of a chemical reaction?']},
+    {name:'Module 4 — Drivers of Reactions', iqs:['IQ: What energy changes occur in chemical reactions?','IQ: How is the rate of a chemical reaction controlled?']},
+    {name:'Module 5 — Equilibrium & Acid Reactions', iqs:['IQ: What happens when chemical reactions do not go to completion?','IQ: How do the definitions of acids and bases help us to understand the nature of these substances?']},
+    {name:'Module 6 — Acid/Base Reactions', iqs:['IQ: How are the characteristics and properties of acids and bases explained?','IQ: What is the role of water in reactions of acids and bases?']},
+    {name:'Module 7 — Organic Chemistry', iqs:['IQ: How are the structures of organic compounds represented?','IQ: What are the properties and uses of organic compounds?']},
+    {name:'Module 8 — Applying Chemical Ideas', iqs:['IQ: How are the chemical properties of a substance identified?','IQ: How are chemical techniques applied in society?']},
+  ],
+  '_chem': [
+    {name:'Module 1 — Properties & Structure of Matter', iqs:['IQ: How do the properties of substances help us classify them?','IQ: How does the atomic structure of elements determine the identity and properties of elements and compounds?']},
+    {name:'Module 2 — Introduction to Quantitative Chemistry', iqs:['IQ: How are measurements made in chemistry?','IQ: How do we determine the mass and amounts in chemical reactions?']},
+    {name:'Module 3 — Reactive Chemistry', iqs:['IQ: What are the products of a chemical reaction?','IQ: What determines the rate of a chemical reaction?']},
+    {name:'Module 4 — Drivers of Reactions', iqs:['IQ: What energy changes occur in chemical reactions?','IQ: How is the rate of a chemical reaction controlled?']},
+  ],
+  '11BIO1': [
+    {name:'Module 1 — Cells as the Basis of Life', iqs:['IQ: What distinguishes one cell from another?','IQ: How do cells coordinate activities within their internal environment and the external environment?']},
+    {name:'Module 2 — Organisation of Living Things', iqs:['IQ: How are cells arranged in a multicellular organism?','IQ: How do the systems of a multicellular organism interact to ensure the survival of the organism?']},
+    {name:'Module 3 — Biological Diversity', iqs:['IQ: How can the origins and diversity of living things be explained?','IQ: What is the relationship between evolution and biodiversity?']},
+    {name:'Module 4 — Ecosystem Dynamics', iqs:['IQ: What effect do changing ecosystems have on biodiversity?','IQ: How do selection pressures within an ecosystem influence evolutionary change?']},
+    {name:'Module 5 — Heredity', iqs:['IQ: How is genetic material inherited?','IQ: How can the inheritance of characteristics be predicted?']},
+    {name:'Module 6 — Genetic Change', iqs:['IQ: How does mutation introduce new alleles into a population?','IQ: How does genetic variation lead to evolutionary change in a population?']},
+    {name:'Module 7 — Infectious Disease', iqs:['IQ: How are diseases transmitted?','IQ: How does the human immune system respond to exposure to a pathogen?']},
+    {name:'Module 8 — Non-Infectious Disease & Disorders', iqs:['IQ: How are non-infectious diseases different from infectious diseases?','IQ: What are the causes and effects of non-infectious disease?']},
+  ],
+  '_bio': [
+    {name:'Module 1 — Cells as the Basis of Life', iqs:['IQ: What distinguishes one cell from another?','IQ: How do cells coordinate activities?']},
+    {name:'Module 2 — Organisation of Living Things', iqs:['IQ: How are cells arranged in a multicellular organism?']},
+    {name:'Module 3 — Biological Diversity', iqs:['IQ: How can the origins and diversity of living things be explained?']},
+    {name:'Module 4 — Ecosystem Dynamics', iqs:['IQ: What effect do changing ecosystems have on biodiversity?']},
+  ],
+  '11MAX2': [
+    {name:'Functions', iqs:['Graphing Techniques','Polynomials','Inequalities']},
+    {name:'Trigonometric Functions', iqs:['Trig Identities','Inverse Trig','Trig Equations']},
+    {name:'Calculus', iqs:['Rates of Change','Integration Techniques','Differential Equations']},
+    {name:'Combinatorics', iqs:['Permutations','Combinations','Pascal\'s Triangle','Binomial Theorem']},
+    {name:'Proof', iqs:['Proof by Induction','Proof by Contradiction']},
+    {name:'Vectors', iqs:['2D Vectors','Geometric Proofs']},
+    {name:'Statistical Analysis', iqs:['Discrete Random Variables','Bernoulli & Binomial']},
+  ],
+  '11MAE2': [
+    {name:'Functions', iqs:['Graphs & Equations','Trigonometry','Exponentials & Logarithms']},
+    {name:'Calculus', iqs:['Differentiation','Applications of Differentiation','Integration','Applications of Integration']},
+    {name:'Financial Maths', iqs:['Sequences & Series','Financial Applications']},
+    {name:'Statistical Analysis', iqs:['Descriptive Statistics','Bivariate Data','Probability']},
+  ],
+  '11ENA5b': [
+    {name:'Common Module — Reading to Write', iqs:['Textual Analysis','Close Reading','Narrative Craft']},
+    {name:'Module A — Language, Identity & Culture', iqs:['Language & Meaning','Representation','Cultural Context']},
+    {name:'Module B — Close Study of Literature', iqs:['Prescribed Text','Detailed Analysis','Authorial Craft']},
+    {name:'Module C — Craft of Writing', iqs:['Creative Writing','Discursive Writing','Reflective Writing']},
+  ],
+  '11EST3': [
+    {name:'Engineering Fundamentals', iqs:['Engineering Principles','Materials & Structures','Mechanisms']},
+    {name:'Engineering Application', iqs:['Civil Structures','Personal & Public Transport','Biomedical Engineering','Aeronautical Engineering']},
+  ],
+  '_hms':    [{name:'Hospitality', iqs:['Food Safety','Nutrition','Menu Planning','Kitchen Operations','Catering','Events','Service Styles']}],
+  '_sac':    [{name:'Core', iqs:['Personal & Social Identity','Intercultural Communication','Social Inclusion & Exclusion']},{name:'Depth Studies', iqs:['Belief Systems','Popular Culture','Surf Culture']},{name:'PIP', iqs:['Research Methods','Cross-Cultural Comparisons']}],
+  '_bus':    [{name:'Operations', iqs:['Operations Management']},{name:'Marketing', iqs:['Marketing Strategies']},{name:'Finance', iqs:['Financial Management']},{name:'Human Resources', iqs:['HR Management']}],
+  '_legal':  [{name:'Core', iqs:['Crime','Human Rights','Family','Workplace','Shelter','World Order']},{name:'Options', iqs:['Legal Processes','Law Reform']}],
+  '_geo':    [{name:'Core', iqs:['Biophysical Interactions','Ecosystems at Risk','Urban Places']},{name:'Options', iqs:['People & Economic Activity','Megacities']}],
+  '_drama':  [{name:'Core', iqs:['Australian Drama','Group Performance','Individual Project']},{name:'Studies', iqs:['Studies in Drama','Theatrical Traditions']}],
+  '_cafs':   [{name:'Core', iqs:['Research Methodology','Groups in Context','Parenting & Caring']},{name:'Options', iqs:['Social Impact of Technology','Individuals & Work']}],
+  '_sor':    [{name:'Core', iqs:['Religion & Belief Systems','Religious Tradition Depth Study']},{name:'Options', iqs:['Religion & Peace','Religion & Ethics','Sacred Texts']}],
+  '_dt':     [{name:'Core', iqs:['Design & Technology Projects','Innovation & Emerging Tech','Designing & Producing']},{name:'Skills', iqs:['Sketching & CAD','Material Properties']}],
+  '_food':   [{name:'Core', iqs:['Food Availability','Nutrition','Food Quality','Food Manufacture','Food Product Development']}],
+  '_txtl':   [{name:'Core', iqs:['Design','Properties of Textiles','Colouration','Construction','Textile Arts']}],
+  '_ag':     [{name:'Core', iqs:['Farm Case Study','Plant Production','Animal Production','Farm Product Study']}],
+  '_lang':   [{name:'Core', iqs:['Prescribed Text','Listening','Reading','Writing','Speaking']},{name:'Skills', iqs:['Grammar','Vocabulary','Culture']}],
+  '_esci':   [{name:'Module 1', iqs:['Earth\'s Resources','Plate Tectonics']},{name:'Module 2', iqs:['Hazards','Climate Science']},{name:'Module 3', iqs:['Renewable Energy','The Carbon Cycle']},{name:'Module 4', iqs:['Water','Atmosphere']}],
+  '_inv':    [{name:'Core', iqs:['Cause & Effect','Scientific Models','Theories & Laws','Science & Technology','Practical Investigations']}],
+  '_math':   [{name:'Algebra & Functions', iqs:['Algebra','Functions','Trigonometry']},{name:'Calculus', iqs:['Differentiation','Integration']},{name:'Statistics & Probability', iqs:['Statistics','Probability']},{name:'Other', iqs:['Proof','Vectors','Complex Numbers','Geometry']}],
+  '_science':[{name:'Theory', iqs:['Module Content','Equations','Diagrams']},{name:'Practical', iqs:['Lab Report','Practice Questions','Past Papers']}],
+  '_english':[{name:'Common Module', iqs:['Essay','Close Study','Analysis']},{name:'Modules', iqs:['Module A','Module B','Module C']},{name:'Writing', iqs:['Creative','Techniques','Themes']}],
+  '_default':[{name:'Study', iqs:['Revision','New Content','Practice Questions','Past Papers','Summary Notes','Concept Review','Exam Prep']}],
 };
 
-function getTopicsForSubject(sub) {
-  if(!sub) return SUBJECT_TOPICS['_default'];
-  if(SUBJECT_TOPICS[sub.icsCode]) return SUBJECT_TOPICS[sub.icsCode];
+function getModulesForSubject(sub) {
+  if(!sub) return SUBJECT_MODULES['_default'];
+  if(SUBJECT_MODULES[sub.icsCode]) return SUBJECT_MODULES[sub.icsCode];
   const name = (sub.name||'').toLowerCase();
-  if(name.includes('math')||name.includes('ext 1')||name.includes('ext 2')||name.includes('standard')) return SUBJECT_TOPICS['_math'];
-  if(name.includes('chem')||name.includes('bio')||name.includes('phys')) return SUBJECT_TOPICS['_science'];
-  if(name.includes('earth')||name.includes('environmental')) return SUBJECT_TOPICS['_esci'];
-  if(name.includes('investigating science')) return SUBJECT_TOPICS['_inv'];
-  if(name.includes('english')||name.includes('eal')) return SUBJECT_TOPICS['_english'];
-  if(name.includes('hms')||name.includes('hospitality')) return SUBJECT_TOPICS['_hms'];
-  if(name.includes('society')||name.includes('culture')) return SUBJECT_TOPICS['_sac'];
-  if(name.includes('business')) return SUBJECT_TOPICS['_bus'];
-  if(name.includes('legal')) return SUBJECT_TOPICS['_legal'];
-  if(name.includes('geography')) return SUBJECT_TOPICS['_geo'];
-  if(name.includes('drama')) return SUBJECT_TOPICS['_drama'];
-  if(name.includes('cafs')) return SUBJECT_TOPICS['_cafs'];
-  if(name.includes('religion')) return SUBJECT_TOPICS['_sor'];
-  if(name.includes('design & tech')) return SUBJECT_TOPICS['_dt'];
-  if(name.includes('food tech')) return SUBJECT_TOPICS['_food'];
-  if(name.includes('textil')) return SUBJECT_TOPICS['_txtl'];
-  if(name.includes('agricul')) return SUBJECT_TOPICS['_ag'];
-  if(name.includes('japanese')||name.includes('french')||name.includes('german')||name.includes('italian')||name.includes('chinese')||name.includes('korean')||name.includes('latin')||name.includes('spanish')||name.includes('arabic')||name.includes('greek')||name.includes('indonesian')) return SUBJECT_TOPICS['_lang'];
-  // Also use subject's custom topics if defined
-  if(sub.topics && sub.topics.length) return sub.topics;
-  return SUBJECT_TOPICS['_default'];
+  if(name.includes('phys')) return SUBJECT_MODULES['_physics'];
+  if(name.includes('chem')) return SUBJECT_MODULES['_chem'];
+  if(name.includes('bio')) return SUBJECT_MODULES['_bio'];
+  if(name.includes('math')||name.includes('ext 1')||name.includes('ext 2')||name.includes('standard')) return SUBJECT_MODULES['_math'];
+  if(name.includes('earth')||name.includes('environmental')) return SUBJECT_MODULES['_esci'];
+  if(name.includes('investigating science')) return SUBJECT_MODULES['_inv'];
+  if(name.includes('english')||name.includes('eal')) return SUBJECT_MODULES['_english'];
+  if(name.includes('hms')||name.includes('hospitality')) return SUBJECT_MODULES['_hms'];
+  if(name.includes('society')||name.includes('culture')) return SUBJECT_MODULES['_sac'];
+  if(name.includes('business')) return SUBJECT_MODULES['_bus'];
+  if(name.includes('legal')) return SUBJECT_MODULES['_legal'];
+  if(name.includes('geography')) return SUBJECT_MODULES['_geo'];
+  if(name.includes('drama')) return SUBJECT_MODULES['_drama'];
+  if(name.includes('cafs')) return SUBJECT_MODULES['_cafs'];
+  if(name.includes('religion')) return SUBJECT_MODULES['_sor'];
+  if(name.includes('design & tech')) return SUBJECT_MODULES['_dt'];
+  if(name.includes('food tech')) return SUBJECT_MODULES['_food'];
+  if(name.includes('textil')) return SUBJECT_MODULES['_txtl'];
+  if(name.includes('agricul')) return SUBJECT_MODULES['_ag'];
+  if(name.includes('japanese')||name.includes('french')||name.includes('german')||name.includes('italian')||name.includes('chinese')||name.includes('korean')||name.includes('latin')||name.includes('spanish')||name.includes('arabic')||name.includes('greek')||name.includes('indonesian')) return SUBJECT_MODULES['_lang'];
+  if(sub.topics && sub.topics.length) return [{name:'Topics', iqs:sub.topics}];
+  return SUBJECT_MODULES['_default'];
+}
+// Backwards-compat: flatten modules into a flat topic list for coverage tracking
+function getTopicsForSubject(sub) {
+  const mods=getModulesForSubject(sub);
+  const all=[];
+  for(const m of mods){all.push(m.name);for(const iq of m.iqs)all.push(iq);}
+  return all;
 }
 const CONF=['Lost','Shaky','OK','Solid','Nailed'];
 const CE=['😵','😟','🙂','💪','🔥'];
@@ -175,10 +252,10 @@ function icsEventsToTimetable(evts, subjects){
 /* ════════════════════════════════
    DATA
 ════════════════════════════════ */
-function loadLocal(){try{const r=localStorage.getItem(KEY);return r?JSON.parse(r):null;}catch{return null;}}
-function saveLocal(d){try{localStorage.setItem(KEY,JSON.stringify(d));}catch{}}
+function loadLocal(){try{const r=localStorage.getItem(KEY);if(!r)return null;const d=JSON.parse(r);if(!d||typeof d!=='object')return null;if(!d.name)return null;d.sessions=Array.isArray(d.sessions)?d.sessions:[];d.subjects=Array.isArray(d.subjects)?d.subjects:[];d.tests=Array.isArray(d.tests)?d.tests:[];d.timetable=Array.isArray(d.timetable)?d.timetable:[];if(!d.joined)d.joined=today();if(!d.year)d.year=11;return d;}catch{return null;}}
+function saveLocal(d){try{localStorage.setItem(KEY,JSON.stringify(d));}catch(e){console.error('Save failed:',e);showToast('Storage full — data not saved! Export a backup now.','⚠');}}
 function loadSync(){try{const r=localStorage.getItem(SKEY);return r?JSON.parse(r):{apiKey:'',binId:'',lastSynced:null,status:'idle'};}catch{return{apiKey:'',binId:'',lastSynced:null,status:'idle'};}}
-function saveSync(s){try{localStorage.setItem(SKEY,JSON.stringify(s));}catch{}}
+function saveSync(s){try{localStorage.setItem(SKEY,JSON.stringify(s));}catch(e){console.error('Sync save failed:',e);}}
 function newAccount(name,pin,year,subs){return{name:name.trim(),pin,joined:today(),year,subjects:subs||ALL_PRESET_SUBS.slice(0,7),sessions:[],tests:[],timetable:[],graceUsed:null};}
 function exportCode(d){const s={n:d.name,p:d.pin,j:d.joined,y:d.year,subs:d.subjects,s:d.sessions,tests:d.tests||[],tt:d.timetable||[],g:d.graceUsed};const bytes=new TextEncoder().encode(JSON.stringify(s));let bin='';for(const b of bytes)bin+=String.fromCharCode(b);return btoa(bin);}
 function importCode(code){try{const bin=atob(code.trim());const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);const s=JSON.parse(new TextDecoder().decode(bytes));return{name:s.n,pin:s.p,joined:s.j||today(),year:s.y||11,subjects:s.subs||DEFAULT_SUBS,sessions:s.s||[],tests:s.tests||[],timetable:s.tt||[],graceUsed:s.g||null};}catch{return null;}}
@@ -621,7 +698,7 @@ async function lbPush(){
   const{doc,setDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
   const stats=buildLbStats(S.data);if(!stats)return;
   const userId=getLbUserId();
-  try{await setDoc(doc(db,'leaderboard',userId),{...stats,userId});}catch(e){console.warn('LB push failed:',e);}
+  try{await setDoc(doc(db,'leaderboard',userId),{...stats,userId});}catch(e){console.warn('LB push failed:',e);showToast('Leaderboard update failed — check your connection.','!');}
 }
 
 async function lbFetchAll(){
@@ -630,7 +707,7 @@ async function lbFetchAll(){
   try{
     const snap=await getDocs(query(collection(db,'leaderboard'),orderBy('totalMins','desc')));
     const rows=[];snap.forEach(d=>rows.push({id:d.id,...d.data()}));return rows;
-  }catch(e){console.warn('LB fetch failed:',e);return[];}
+  }catch(e){console.warn('LB fetch failed:',e);showToast('Could not load leaderboard — check your connection.','!');return[];}
 }
 
 let _lbCache=null,_lbCacheTime=0;
@@ -753,13 +830,317 @@ function updateSyncDot(){const d=document.querySelector('.sync-dot');if(!d)retur
 ════════════════════════════════ */
 let timerInt=null,timerStart=0,timerElap=0,timerRunning=false,timerTarget=25*60;
 let breakInt=null,breakElap=0,breakTarget=5*60;
-function startTimer(){timerStart=Date.now()-timerElap*1000;timerRunning=true;clearInterval(timerInt);timerInt=setInterval(()=>{timerElap=Math.floor((Date.now()-timerStart)/1000);if(timerElap>=timerTarget){timerElap=timerTarget;clearInterval(timerInt);timerRunning=false;S.pomodoroCount++;S.pomodoroBreak=true;breakElap=0;breakTarget=S.pomodoroCount%4===0?20*60:5*60;startBreak();renderTimerFast();showToast('Timer done — take a break, then log your session','⏱');}else renderTimerFast();},500);}
+function startTimer(){timerStart=Date.now()-timerElap*1000;timerRunning=true;clearInterval(timerInt);timerInt=setInterval(()=>{timerElap=Math.floor((Date.now()-timerStart)/1000);if(timerElap>=timerTarget){timerElap=timerTarget;clearInterval(timerInt);timerRunning=false;Ambient.stop();S.pomodoroCount++;S.pomodoroBreak=true;breakElap=0;breakTarget=S.pomodoroCount%4===0?20*60:5*60;startBreak();renderTimerFast();showToast('Timer done — take a break, then log your session','⏱');}else renderTimerFast();},500);}
 function startBreak(){clearInterval(breakInt);breakInt=setInterval(()=>{breakElap++;if(breakElap>=breakTarget){clearInterval(breakInt);S.pomodoroBreak=false;showToast('Break over — log your session or start another round','🔔');if(S.view==='timer')render();}else if(S.view==='timer')renderBreakFast();},1000);}
 function renderBreakFast(){const rem=Math.max(0,breakTarget-breakElap),m=Math.floor(rem/60),s=rem%60;const el=document.getElementById('break-timer');if(el)el.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;}
 function skipBreak(){clearInterval(breakInt);S.pomodoroBreak=false;render();}
 function pauseTimer(){clearInterval(timerInt);timerRunning=false;timerElap=Math.floor((Date.now()-timerStart)/1000);}
 function resetTimer(){clearInterval(timerInt);timerRunning=false;timerElap=0;renderTimerFast();}
-function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const t=document.getElementById('tt-time');if(t){t.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const b=document.getElementById('tt-bar');if(b)b.style.width=`${Math.min(100,(timerElap/timerTarget)*100)}%`;const l=document.getElementById('tt-lbl');if(l)l.textContent=timerRunning?'Running…':timerElap>0?'Paused':'Ready';const ring=document.getElementById('tt-ring');if(ring){const R=80,CIRC=2*Math.PI*R,pct=Math.min(100,(timerElap/timerTarget)*100);ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=timerRunning?'var(--acc)':'var(--bdS)';ring.style.filter=timerRunning?'drop-shadow(0 0 6px rgba(192,90,48,.3))':'none';}}
+function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const pct=Math.min(100,(timerElap/timerTarget)*100);const t=document.getElementById('tt-time');if(t){t.innerHTML=`${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const l=document.getElementById('tt-lbl');if(l){const focusLabels=['Ready','Focus time','In the zone','Deep focus','Unstoppable'];const fi=timerRunning?Math.min(4,Math.floor(timerElap/600)):0;l.textContent=timerRunning?focusLabels[fi]:timerElap>0?'Paused':'Ready';}const pc=document.getElementById('tt-pct');if(pc)pc.textContent=Math.round(pct)+'%';const R=88,CIRC=2*Math.PI*R;const ring=document.getElementById('tt-ring');if(ring){ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=timerRunning?'url(#ring-grad)':'var(--bdS)';ring.setAttribute('filter',timerRunning?'url(#ring-glow)':'');}const dotAngle=((pct/100)*360-90)*Math.PI/180;const dotX=110+R*Math.cos(dotAngle),dotY=110+R*Math.sin(dotAngle);const dot=document.getElementById('tt-dot');if(dot){dot.setAttribute('cx',dotX.toFixed(1));dot.setAttribute('cy',dotY.toFixed(1));}const dotG=document.getElementById('tt-dot-glow');if(dotG){dotG.setAttribute('cx',dotX.toFixed(1));dotG.setAttribute('cy',dotY.toFixed(1));}}
+
+/* ════════════════════════════════
+   AMBIENT AUDIO ENGINE
+════════════════════════════════ */
+const Ambient=(()=>{
+  let ctx=null,master=null,nodes=[],timeouts=[],playing=false,theme=null;
+  function init(){
+    if(!ctx)ctx=new(window.AudioContext||window.webkitAudioContext)();
+    if(ctx.state==='suspended')ctx.resume();
+    master=ctx.createGain();master.gain.value=0.25;master.connect(ctx.destination);
+  }
+  function makeNoise(dur,type){
+    const sr=ctx.sampleRate,len=sr*dur,buf=ctx.createBuffer(1,len,sr),d=buf.getChannelData(0);
+    let last=0;
+    for(let i=0;i<len;i++){
+      const w=Math.random()*2-1;
+      if(type==='brown'){d[i]=(last+0.02*w)/1.02;last=d[i];d[i]*=3.5;}
+      else if(type==='pink'){d[i]=last*0.99+w*0.1;last=d[i];d[i]*=5;}
+      else d[i]=w;
+    }
+    return buf;
+  }
+  function loopNoise(buf,gain,freq,fType){
+    const src=ctx.createBufferSource();src.buffer=buf;src.loop=true;
+    const g=ctx.createGain();g.gain.value=gain;
+    const f=ctx.createBiquadFilter();f.type=fType||'lowpass';f.frequency.value=freq;
+    src.connect(f);f.connect(g);g.connect(master);src.start();
+    nodes.push(src,g,f);return{src,gain:g,filter:f};
+  }
+  function scheduleChirp(){
+    if(!playing||theme!=='forest')return;
+    const base=1800+Math.random()*2500;
+    const osc=ctx.createOscillator(),g=ctx.createGain();
+    osc.type='sine';osc.frequency.setValueAtTime(base,ctx.currentTime);
+    osc.frequency.exponentialRampToValueAtTime(base*(0.7+Math.random()*0.6),ctx.currentTime+0.12);
+    g.gain.setValueAtTime(0,ctx.currentTime);
+    g.gain.linearRampToValueAtTime(0.025+Math.random()*0.02,ctx.currentTime+0.015);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.18);
+    osc.connect(g);g.connect(master);osc.start();osc.stop(ctx.currentTime+0.22);
+    if(Math.random()<0.4){
+      timeouts.push(setTimeout(()=>{
+        if(!playing||theme!=='forest')return;
+        const o2=ctx.createOscillator(),g2=ctx.createGain();
+        o2.type='sine';o2.frequency.value=base*1.25;
+        g2.gain.setValueAtTime(0,ctx.currentTime);
+        g2.gain.linearRampToValueAtTime(0.018,ctx.currentTime+0.01);
+        g2.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.12);
+        o2.connect(g2);g2.connect(master);o2.start();o2.stop(ctx.currentTime+0.15);
+      },180+Math.random()*120));
+    }
+    timeouts.push(setTimeout(scheduleChirp,2500+Math.random()*5500));
+  }
+  function scheduleClink(){
+    if(!playing||theme!=='cafe')return;
+    const osc=ctx.createOscillator(),g=ctx.createGain();
+    osc.type='sine';osc.frequency.value=3500+Math.random()*2500;
+    g.gain.setValueAtTime(0,ctx.currentTime);
+    g.gain.linearRampToValueAtTime(0.012,ctx.currentTime+0.004);
+    g.gain.exponentialRampToValueAtTime(0.001,ctx.currentTime+0.07);
+    osc.connect(g);g.connect(master);osc.start();osc.stop(ctx.currentTime+0.09);
+    timeouts.push(setTimeout(scheduleClink,5000+Math.random()*9000));
+  }
+  function playForest(){
+    const brown=makeNoise(4,'brown');
+    loopNoise(brown,0.12,280,'lowpass');
+    const white=makeNoise(4,'white');
+    loopNoise(white,0.015,2500,'highpass');
+    timeouts.push(setTimeout(scheduleChirp,800));
+    timeouts.push(setTimeout(scheduleChirp,3500));
+  }
+  function playCafe(){
+    const pink=makeNoise(4,'pink');
+    loopNoise(pink,0.08,350,'lowpass');
+    const white=makeNoise(4,'white');
+    loopNoise(white,0.04,1800,'highpass');
+    timeouts.push(setTimeout(scheduleClink,2000));
+  }
+  function playOcean(){
+    const brown=makeNoise(4,'brown');
+    const{gain:wg}=loopNoise(brown,0.18,220,'lowpass');
+    const lfo=ctx.createOscillator(),lg=ctx.createGain();
+    lfo.type='sine';lfo.frequency.value=0.07;lg.gain.value=0.09;
+    lfo.connect(lg);lg.connect(wg.gain);lfo.start();nodes.push(lfo,lg);
+    const white=makeNoise(4,'white');
+    const{gain:sg}=loopNoise(white,0.035,700,'bandpass');
+    const lfo2=ctx.createOscillator(),lg2=ctx.createGain();
+    lfo2.type='sine';lfo2.frequency.value=0.11;lg2.gain.value=0.025;
+    lfo2.connect(lg2);lg2.connect(sg.gain);lfo2.start();nodes.push(lfo2,lg2);
+  }
+  return{
+    play(t){
+      this.stop();init();theme=t;playing=true;
+      if(t==='forest')playForest();
+      else if(t==='cafe')playCafe();
+      else if(t==='ocean')playOcean();
+    },
+    stop(){
+      timeouts.forEach(t=>clearTimeout(t));timeouts=[];
+      nodes.forEach(n=>{try{n.stop?.();}catch(e){}try{n.disconnect();}catch(e){}});
+      nodes=[];
+      if(master)try{master.disconnect();}catch(e){}
+      master=null;playing=false;theme=null;
+    },
+    get playing(){return playing;}
+  };
+})();
+
+/* ════════════════════════════════
+   TIMER BACKGROUNDS (SVG)
+════════════════════════════════ */
+function _srand(s){return()=>{s=(s*16807)%2147483647;return s/2147483647;};}
+
+function renderTimerBg(theme){
+  if(theme==='forest')return _renderForestBg();
+  if(theme==='cafe')return _renderCafeBg();
+  if(theme==='ocean')return _renderOceanBg();
+  return'';
+}
+
+function _renderForestBg(){
+  const r=_srand(42);
+  const layer=(n,baseY,minH,maxH,w)=>{
+    let d='';
+    for(let i=0;i<n;i++){
+      const x=(i/(n-1))*860-30+(r()-0.5)*28;
+      const h=minH+r()*(maxH-minH);
+      const tw=w+(r()-0.5)*12;
+      d+=`M${x-tw/2},${baseY} L${x},${baseY-h} L${x+tw/2},${baseY} Z `;
+    }
+    return d;
+  };
+  return`<svg class="tbg-svg" viewBox="0 0 800 300" preserveAspectRatio="xMidYMax slice">
+    <defs>
+      <linearGradient id="fsky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#9BAF97"/>
+        <stop offset="100%" stop-color="#889E84"/>
+      </linearGradient>
+      <linearGradient id="ffog" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="rgba(155,175,151,0)"/>
+        <stop offset="100%" stop-color="rgba(155,175,151,.4)"/>
+      </linearGradient>
+    </defs>
+    <rect width="800" height="300" fill="url(#fsky)"/>
+    <g class="tbg-layer" style="--dx:-6px;--dur:22s;">
+      <path d="${layer(18,265,70,155,42)}" fill="#7D9D78" opacity=".65"/>
+    </g>
+    <g class="tbg-layer" style="--dx:5px;--dur:28s;">
+      <path d="${layer(22,278,55,125,36)}" fill="#5C7F58" opacity=".8"/>
+    </g>
+    <g class="tbg-layer" style="--dx:-3px;--dur:35s;">
+      <path d="${layer(26,290,45,105,30)}" fill="#3D6039"/>
+    </g>
+    <g class="tbg-layer" style="--dx:2px;--dur:40s;">
+      <path d="${layer(14,300,65,135,48)}" fill="#264026"/>
+    </g>
+    <rect width="800" height="80" y="230" fill="url(#ffog)" class="tbg-fog"/>
+    <rect width="800" height="50" y="255" fill="url(#ffog)" class="tbg-fog" style="animation-delay:3s;animation-duration:18s;"/>
+    <ellipse cx="200" cy="45" rx="120" ry="25" fill="rgba(180,200,180,.06)" class="tbg-cloud" style="--cx:60px;--cd:45s;"/>
+    <ellipse cx="580" cy="30" rx="90" ry="18" fill="rgba(180,200,180,.05)" class="tbg-cloud" style="--cx:50px;--cd:55s;animation-delay:8s;"/>
+    <ellipse cx="400" cy="55" rx="70" ry="14" fill="rgba(180,200,180,.04)" class="tbg-cloud" style="--cx:40px;--cd:50s;animation-delay:15s;"/>
+    <circle cx="680" cy="40" r="4" fill="rgba(255,255,200,.18)" class="tbg-firefly" style="--fy:-20px;--fx:8px;--fd:4s;"/>
+    <circle cx="150" cy="60" r="3" fill="rgba(255,255,200,.14)" class="tbg-firefly" style="--fy:-15px;--fx:-6px;--fd:5s;animation-delay:1.5s;"/>
+    <circle cx="400" cy="50" r="3.5" fill="rgba(255,255,200,.1)" class="tbg-firefly" style="--fy:-25px;--fx:10px;--fd:6s;animation-delay:3s;"/>
+    <circle cx="550" cy="80" r="2.5" fill="rgba(255,255,200,.13)" class="tbg-firefly" style="--fy:-18px;--fx:-5px;--fd:4.5s;animation-delay:2s;"/>
+    <circle cx="80" cy="95" r="2" fill="rgba(255,255,200,.1)" class="tbg-firefly" style="--fy:-22px;--fx:12px;--fd:5.5s;animation-delay:4s;"/>
+    <circle cx="720" cy="100" r="3" fill="rgba(255,255,200,.09)" class="tbg-firefly" style="--fy:-12px;--fx:-8px;--fd:7s;animation-delay:6s;"/>
+    <path d="M120,80 Q125,90 130,82 Q132,78 128,80 Z" fill="rgba(90,130,60,.3)" class="tbg-leaf" style="--lx:80px;--ly:200px;--lr:400deg;--ld:8s;"/>
+    <path d="M350,60 Q355,70 360,62 Q362,58 358,60 Z" fill="rgba(120,100,40,.25)" class="tbg-leaf" style="--lx:-50px;--ly:220px;--lr:-350deg;--ld:10s;animation-delay:3s;"/>
+    <path d="M600,70 Q605,80 610,72 Q612,68 608,70 Z" fill="rgba(80,120,50,.3)" class="tbg-leaf" style="--lx:60px;--ly:210px;--lr:380deg;--ld:9s;animation-delay:6s;"/>
+    <path d="M250,50 Q253,58 258,52 Q259,48 255,50 Z" fill="rgba(140,110,30,.2)" class="tbg-leaf" style="--lx:-40px;--ly:230px;--lr:-420deg;--ld:11s;animation-delay:9s;"/>
+    <path d="M500,90 Q504,98 508,92 Q509,88 505,90 Z" fill="rgba(100,130,50,.25)" class="tbg-leaf" style="--lx:70px;--ly:190px;--lr:360deg;--ld:7.5s;animation-delay:1.5s;"/>
+  </svg>`;
+}
+
+function _renderCafeBg(){
+  // City skyline
+  const bldgs=[
+    {x:0,w:45,h:65},{x:50,w:35,h:100},{x:90,w:55,h:75},{x:150,w:28,h:120},
+    {x:182,w:60,h:85},{x:248,w:30,h:110},{x:282,w:50,h:70},{x:336,w:40,h:130},
+    {x:380,w:55,h:90},{x:440,w:35,h:105},{x:480,w:60,h:65},{x:545,w:30,h:115},
+    {x:580,w:50,h:80},{x:635,w:40,h:100},{x:680,w:45,h:70},{x:730,w:35,h:95},{x:770,w:40,h:60}
+  ];
+  const baseY=200;
+  let skyline='M0,'+baseY;
+  for(const b of bldgs)skyline+=` L${b.x},${baseY} L${b.x},${baseY-b.h} L${b.x+b.w},${baseY-b.h} L${b.x+b.w},${baseY}`;
+  skyline+=` L800,${baseY} L800,300 L0,300 Z`;
+  // Windows: small glowing rectangles on buildings
+  let windows='';
+  const wr=_srand(77);
+  for(const b of bldgs){
+    const cols=Math.floor(b.w/14);
+    const rows=Math.floor(b.h/18);
+    for(let r=0;r<rows;r++)for(let c=0;c<cols;c++){
+      if(wr()<0.45)continue;
+      const wx=b.x+6+c*14,wy=baseY-b.h+8+r*18;
+      const bright=0.3+wr()*0.6;
+      windows+=`<rect x="${wx}" y="${wy}" width="8" height="10" rx="1" fill="rgba(255,200,100,${bright.toFixed(2)})" class="${wr()<0.15?'tbg-win-flicker':''}"/>`;
+    }
+  }
+  // Rain
+  let rain='';
+  const rr=_srand(99);
+  for(let i=0;i<40;i++){
+    const rx=rr()*800,ry=rr()*250,rl=8+rr()*16;
+    rain+=`<line x1="${rx}" y1="${ry}" x2="${rx-1}" y2="${ry+rl}" stroke="rgba(180,200,220,.15)" stroke-width=".8" class="tbg-rain" style="animation-delay:${(rr()*2).toFixed(1)}s;"/>`;
+  }
+  // Steam
+  const steam=`<path d="M720,260 Q725,240 718,225 Q712,210 718,195 Q724,180 720,165" fill="none" stroke="rgba(255,255,255,.12)" stroke-width="2" stroke-linecap="round" class="tbg-steam"/>
+  <path d="M730,262 Q735,245 728,230 Q722,215 728,200" fill="none" stroke="rgba(255,255,255,.08)" stroke-width="1.5" stroke-linecap="round" class="tbg-steam" style="animation-delay:.8s;"/>`;
+  return`<svg class="tbg-svg" viewBox="0 0 800 300" preserveAspectRatio="xMidYMax slice">
+    <defs>
+      <linearGradient id="csky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#1a1420"/>
+        <stop offset="100%" stop-color="#2a1e14"/>
+      </linearGradient>
+      <radialGradient id="cwarm" cx="70%" cy="80%" r="50%">
+        <stop offset="0%" stop-color="rgba(200,140,60,.08)"/>
+        <stop offset="100%" stop-color="transparent"/>
+      </radialGradient>
+    </defs>
+    <rect width="800" height="300" fill="url(#csky)"/>
+    <rect width="800" height="300" fill="url(#cwarm)"/>
+    ${rain}
+    <path d="${skyline}" fill="#0e0a08"/>
+    ${windows}
+    ${steam}
+    <ellipse cx="700" cy="275" rx="40" ry="8" fill="rgba(200,140,60,.05)"/>
+    <rect x="330" y="82" width="50" height="14" rx="3" fill="none" stroke="rgba(255,100,80,.12)" stroke-width="1" class="tbg-neon"/>
+    <text x="355" y="93" text-anchor="middle" font-size="8" fill="rgba(255,100,80,.18)" class="tbg-neon" font-family="sans-serif">OPEN</text>
+    <rect x="328" y="80" width="54" height="18" rx="4" fill="rgba(255,100,80,.02)" class="tbg-neon"/>
+    <ellipse cx="355" cy="200" rx="30" ry="3" fill="rgba(255,100,80,.03)" class="tbg-neon"/>
+    <g class="tbg-puddle" style="--pd:6s;">
+      <ellipse cx="200" cy="250" rx="35" ry="4" fill="rgba(255,200,100,.02)"/>
+      <ellipse cx="200" cy="250" rx="20" ry="2.5" fill="rgba(255,200,100,.03)" class="tbg-puddle-shimmer"/>
+    </g>
+    <g class="tbg-puddle" style="--pd:8s;">
+      <ellipse cx="500" cy="260" rx="40" ry="4.5" fill="rgba(180,200,220,.02)"/>
+      <ellipse cx="500" cy="260" rx="22" ry="2" fill="rgba(180,200,220,.03)" class="tbg-puddle-shimmer" style="animation-delay:2s;"/>
+    </g>
+    <g class="tbg-puddle" style="--pd:7s;">
+      <ellipse cx="680" cy="245" rx="28" ry="3" fill="rgba(255,200,100,.02)"/>
+      <ellipse cx="680" cy="245" rx="15" ry="2" fill="rgba(255,200,100,.03)" class="tbg-puddle-shimmer" style="animation-delay:4s;"/>
+    </g>
+    <line x1="-50" y1="270" x2="850" y2="268" stroke="rgba(255,220,150,.0)" stroke-width="3" class="tbg-headlight"/>
+    <line x1="-50" y1="272" x2="850" y2="270" stroke="rgba(255,220,150,.0)" stroke-width="2" class="tbg-headlight" style="animation-delay:8s;"/>
+  </svg>`;
+}
+
+function _renderOceanBg(){
+  const wave=(y,amp,freq,w)=>{
+    let d=`M0,${y}`;
+    for(let x=0;x<=w;x+=8){
+      const wy=y+Math.sin((x/w)*Math.PI*2*freq)*amp;
+      d+=` L${x},${wy.toFixed(1)}`;
+    }
+    d+=` L${w},310 L0,310 Z`;return d;
+  };
+  // Stars
+  let stars='';const sr=_srand(55);
+  for(let i=0;i<35;i++){
+    const sx=sr()*800,sy=sr()*120,so=0.2+sr()*0.6,ss=0.8+sr()*1.5;
+    stars+=`<circle cx="${sx}" cy="${sy}" r="${ss.toFixed(1)}" fill="rgba(255,255,255,${so.toFixed(2)})"${sr()<0.2?' class="tbg-star-twinkle"':''}/>`;
+  }
+  return`<svg class="tbg-svg" viewBox="0 0 800 300" preserveAspectRatio="xMidYMax slice">
+    <defs>
+      <linearGradient id="osky" x1="0" y1="0" x2="0" y2="1">
+        <stop offset="0%" stop-color="#0a0e1a"/>
+        <stop offset="40%" stop-color="#12203a"/>
+        <stop offset="100%" stop-color="#1a3050"/>
+      </linearGradient>
+    </defs>
+    <rect width="800" height="300" fill="url(#osky)"/>
+    ${stars}
+    <ellipse cx="250" cy="25" rx="80" ry="12" fill="rgba(200,210,230,.03)" class="tbg-cloud" style="--cx:100px;--cd:60s;"/>
+    <ellipse cx="100" cy="40" rx="60" ry="10" fill="rgba(200,210,230,.025)" class="tbg-cloud" style="--cx:80px;--cd:70s;animation-delay:10s;"/>
+    <ellipse cx="500" cy="18" rx="50" ry="8" fill="rgba(200,210,230,.02)" class="tbg-cloud" style="--cx:70px;--cd:55s;animation-delay:20s;"/>
+    <line x1="180" y1="30" x2="140" y2="55" stroke="rgba(255,255,255,.5)" stroke-width=".8" stroke-linecap="round" class="tbg-shootstar"/>
+    <line x1="180" y1="30" x2="160" y2="42" stroke="rgba(255,255,255,.3)" stroke-width="2" stroke-linecap="round" class="tbg-shootstar" style="filter:blur(1px);"/>
+    <circle cx="650" cy="55" r="22" fill="rgba(255,250,230,.9)" class="tbg-moon"/>
+    <circle cx="650" cy="55" r="35" fill="rgba(255,250,230,.04)"/>
+    <circle cx="650" cy="55" r="50" fill="rgba(255,250,230,.02)"/>
+    <ellipse cx="650" cy="220" rx="4" ry="50" fill="rgba(255,250,230,.04)" class="tbg-moonreflect"/>
+    <ellipse cx="650" cy="240" rx="2" ry="35" fill="rgba(255,250,230,.06)" class="tbg-moonreflect" style="animation-delay:.8s;"/>
+    <ellipse cx="650" cy="260" rx="6" ry="20" fill="rgba(255,250,230,.03)" class="tbg-moonreflect" style="animation-delay:1.6s;"/>
+    <g class="tbg-wave" style="--wy:6px;--dur:6s;">
+      <path d="${wave(210,12,2.5,800)}" fill="rgba(20,55,100,.6)"/>
+    </g>
+    <g class="tbg-wave" style="--wy:8px;--dur:4.5s;animation-delay:.5s;">
+      <path d="${wave(230,10,3,800)}" fill="rgba(25,75,130,.5)"/>
+    </g>
+    <g class="tbg-wave" style="--wy:5px;--dur:5.5s;animation-delay:1s;">
+      <path d="${wave(250,8,3.5,800)}" fill="rgba(30,95,160,.5)"/>
+    </g>
+    <g class="tbg-wave" style="--wy:4px;--dur:3.5s;animation-delay:1.5s;">
+      <path d="${wave(268,6,4,800)}" fill="rgba(40,110,175,.6)"/>
+    </g>
+    <path d="${wave(285,4,5,800)}" fill="rgba(50,130,190,.7)"/>
+    <line x1="50" y1="282" x2="120" y2="282" stroke="rgba(255,255,255,.06)" stroke-width=".5" stroke-linecap="round" class="tbg-foam" style="--fd:5s;"/>
+    <line x1="300" y1="275" x2="390" y2="275" stroke="rgba(255,255,255,.05)" stroke-width=".5" stroke-linecap="round" class="tbg-foam" style="--fd:6s;animation-delay:1.5s;"/>
+    <line x1="550" y1="280" x2="610" y2="280" stroke="rgba(255,255,255,.07)" stroke-width=".5" stroke-linecap="round" class="tbg-foam" style="--fd:4.5s;animation-delay:3s;"/>
+    <line x1="700" y1="270" x2="750" y2="270" stroke="rgba(255,255,255,.04)" stroke-width=".5" stroke-linecap="round" class="tbg-foam" style="--fd:5.5s;animation-delay:2s;"/>
+    <line x1="150" y1="260" x2="200" y2="260" stroke="rgba(255,255,255,.05)" stroke-width=".5" stroke-linecap="round" class="tbg-foam" style="--fd:7s;animation-delay:4s;"/>
+  </svg>`;
+}
 
 /* ════════════════════════════════
    LIVE UPDATE TICKER
@@ -884,15 +1265,31 @@ let S={
   darkMode:localStorage.getItem('mer_dark')==='1',
   pomodoroBreak:false,       // true when in break phase
   pomodoroCount:0,           // completed pomodoros this session
+  timerBg:localStorage.getItem('mer_timer_bg')||'none',  // 'none'|'forest'|'cafe'|'ocean'
+  timerAudio:localStorage.getItem('mer_timer_audio')!=='0', // sound on/off
 };
 
 /* ════════════════════════════════
    RENDER
 ════════════════════════════════ */
+function navTo(view){
+  const prev=S.view;
+  S.view=view;S.modal=null;S.moreMenu=false;
+  const content=document.getElementById('page-content');
+  if(content&&prev!==view){
+    content.classList.add('view-exit');
+    setTimeout(()=>{render();},120);
+  } else render();
+}
+
 function render(){
   const root=document.getElementById('app');
   if(!S.data){root.innerHTML=renderLogin();return;}
+  if(S.view!=='timer')Ambient.stop();
   root.innerHTML=renderShell();
+  // Scroll to top on view change
+  const content=document.getElementById('page-content');
+  if(content)content.scrollTop=0;
   requestAnimationFrame(()=>{
     document.querySelectorAll('[data-bw]').forEach(el=>{el.style.width=el.dataset.bw+'%';});
     // Streak ring animation
@@ -1243,7 +1640,7 @@ function renderShell(){
   </div>
   <div class="wrap">
     <nav class="side dsk">
-      ${[['dashboard','◉','Dashboard'],['timetable','☰','Timetable'],['leaderboard','🏆','Leaderboard'],['history','◔','History'],['progress','△','Progress'],['stats','◇','Stats'],['papers','◧','Papers'],['timer','◷','Timer']].map(([v,i,l])=>`
+      ${[['dashboard','◉','Dashboard'],['timetable','☰','Timetable'],['leaderboard','◈','Leaderboard'],['history','◔','History'],['progress','△','Progress'],['stats','◇','Stats'],['papers','◧','Papers'],['timer','◷','Timer']].map(([v,i,l])=>`
         <div class="si${S.view===v?' on':''}" data-action="nav-${v}"><span class="ico">${i}</span>${l}${v==='timetable'&&hasTT&&todayClasses>0?`<span class="si-badge">${todayClasses}</span>`:''}</div>`).join('')}
       <div class="si-sec">Account</div>
       <div class="si${S.view==='settings'?' on':''}" data-action="nav-settings"><span class="ico">⚙</span>Settings</div>
@@ -1257,7 +1654,7 @@ function renderShell(){
     <div class="bni${S.view==='dashboard'?' on':''}" data-action="nav-dashboard"><span class="bni-ic">◉</span>Home<div class="bni-dot"></div></div>
     <div class="bni${S.view==='timer'?' on':''}" data-action="nav-timer"><span class="bni-ic">◷</span>Timer<div class="bni-dot"></div></div>
     <div class="fab-wrap">
-      <div class="fab" data-action="open-log">＋</div>
+      <div class="fab${todaySess(S.data?.sessions||[]).length===0?' fab-nudge':''}" data-action="open-log">＋</div>
     </div>
     <div class="bni${S.view==='progress'?' on':''}" data-action="nav-progress"><span class="bni-ic">△</span>Progress<div class="bni-dot"></div></div>
     <div class="bni${['timetable','papers','history','stats','settings','leaderboard'].includes(S.view)?' on':''}" data-action="toggle-more"><span class="bni-ic">⋯</span>More<div class="bni-dot"></div></div>
@@ -1266,7 +1663,7 @@ function renderShell(){
   <div class="more-menu" id="more-sheet">
     <div class="more-menu-handle" data-action="close-more"></div>
     <div class="more-item${S.view==='timetable'?' on':''}" data-action="more-nav" data-view="timetable"><span class="more-item-ic">☰</span>Schedule</div>
-    <div class="more-item${S.view==='leaderboard'?' on':''}" data-action="more-nav" data-view="leaderboard"><span class="more-item-ic">🏆</span>Leaderboard</div>
+    <div class="more-item${S.view==='leaderboard'?' on':''}" data-action="more-nav" data-view="leaderboard"><span class="more-item-ic">◈</span>Leaderboard</div>
     <div class="more-item${S.view==='papers'?' on':''}" data-action="more-nav" data-view="papers"><span class="more-item-ic">◧</span>Papers</div>
     <div class="more-item${S.view==='history'?' on':''}" data-action="more-nav" data-view="history"><span class="more-item-ic">◔</span>History</div>
     <div class="more-item${S.view==='stats'?' on':''}" data-action="more-nav" data-view="stats"><span class="more-item-ic">◇</span>Stats</div>
@@ -1432,12 +1829,22 @@ function renderDash(){
   }).join('');
 
   const motivation=getMotivation(sessions,streak);
+  // Quick actions — contextual shortcuts
+  const qaItems=[];
+  qaItems.push({icon:'＋',label:'Log',action:'open-log',cls:''});
+  qaItems.push({icon:'◷',label:'Timer',action:'nav-timer',cls:''});
+  if(hasTT)qaItems.push({icon:'☰',label:'Schedule',action:'nav-timetable',cls:''});
+  qaItems.push({icon:'◧',label:'Papers',action:'nav-papers',cls:''});
+  if(risk&&streak>=2)qaItems.push({icon:'✦',label:'Grace',action:'use-grace',cls:'qa-warn'});
+
   return`
   <div class="dash-greet">
     <div class="dash-date">${new Date().toLocaleDateString('en-AU',{weekday:'long',day:'numeric',month:'long'})}</div>
     <div class="dash-name">${greet}</div>
     <div class="dash-motive">${motivation}</div>
   </div>
+
+  <div class="qa-strip">${qaItems.map(q=>`<div class="qa-btn ${q.cls}" data-action="${q.action}"><span class="qa-ico">${q.icon}</span><span class="qa-lbl">${q.label}</span></div>`).join('')}</div>
 
   ${renderNowNext()}
 
@@ -1478,21 +1885,25 @@ function renderDash(){
 
   <div class="today-overview">
     <div class="ov-tile${tMins>=120?' green':''}">
+      <div class="ov-ico">◷</div>
       <div class="ov-lbl">Today</div>
       <div class="ov-val">${tMins?fmtDur(tMins):'0m'}</div>
       <div class="ov-sub">${todaySess(sessions).length} session${todaySess(sessions).length!==1?'s':''}</div>
     </div>
     <div class="ov-tile">
+      <div class="ov-ico">◔</div>
       <div class="ov-lbl">This week</div>
       <div class="ov-val">${wMins?fmtDur(wMins):'0m'}</div>
       <div class="ov-sub">${Math.round(wMins/60*10)/10}h logged</div>
     </div>
     <div class="ov-tile">
+      <div class="ov-ico">◇</div>
       <div class="ov-lbl">All time</div>
       <div class="ov-val">${totalMins(sessions)?fmtDur(totalMins(sessions)):'0m'}</div>
       <div class="ov-sub">${tSess} session${tSess!==1?'s':''}</div>
     </div>
     <div class="ov-tile${dLeft<=14?' urg-red':dLeft<=30?' urg-amber':dLeft<=60?' accent':''}">
+      <div class="ov-ico">△</div>
       <div class="ov-lbl">${exam.name}</div>
       <div class="ov-val">${Math.max(0,dLeft)}</div>
       <div class="ov-sub">${dLeft<=0?'Exams now':'day'+(dLeft!==1?'s':'')+' to go'}</div>
@@ -1526,6 +1937,11 @@ function renderDash(){
       <span class="cov-frac">${done.length}<small>/${subjects.length}</small></span>
     </div>
     <div class="cov-track"><div class="cov-fill${done.length===subjects.length?' done':''}" data-bw="${cvPct}" style="width:0%"></div></div>
+    <div class="cov-dots">${subjects.map(sub=>{
+      const isDone=done.some(d=>d.id===sub.id);
+      const c=getSubjColor(sub);
+      return`<div class="cov-sub-dot${isDone?' done':''}" title="${sub.name}${isDone?' ✓':''}" data-action="quick-log" data-subject="${sub.id}" style="--dot-bg:${c.bg};--dot-bd:${c.bd};--dot-tx:${c.tx};${isDone?'--dot-fill:var(--ok);':''}"><span class="cov-sub-abbr">${sub.abbr}</span></div>`;
+    }).join('')}</div>
   </div>
 
   ${(()=>{
@@ -2864,45 +3280,78 @@ function renderTimer(){
 
   const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;
   const pct=Math.min(100,(timerElap/timerTarget)*100);
-  const R=80,CIRC=2*Math.PI*R;
+  const R=88,CIRC=2*Math.PI*R;
   const offset=CIRC-(pct/100)*CIRC;
-  const elapMin=Math.floor(timerElap/60);
   const presets=[15,20,25,30,45,60,90];
   const presetLabels={15:'Quick',25:'Pomodoro',45:'Deep',60:'Marathon',90:'Ultra'};
+
+  // Progress dot at tip of ring
+  const dotAngle=((pct/100)*360-90)*Math.PI/180;
+  const dotX=110+R*Math.cos(dotAngle),dotY=110+R*Math.sin(dotAngle);
 
   // Today's timer sessions
   const td=today();
   const todaySess=(S.data?.sessions||[]).filter(s=>s.date===td&&s.subject!=='grace');
   const todayMins=todaySess.reduce((a,s)=>a+s.duration,0);
 
+  // Motivational label based on elapsed
+  const focusLabels=['Ready','Focus time','In the zone','Deep focus','Unstoppable'];
+  const focusIdx=timerRunning?Math.min(4,Math.floor(timerElap/600)):0;
+  const statusLabel=timerRunning?focusLabels[focusIdx]:timerElap>0?'Paused':'Ready';
+
+  const themed=S.timerBg&&S.timerBg!=='none';
+  const trackCol=themed?'rgba(255,255,255,.12)':'var(--srf2)';
+  const tickOff=themed?'rgba(255,255,255,.08)':'var(--bd)';
+  const tickOn=themed?(timerRunning?'rgba(255,255,255,.7)':'rgba(255,255,255,.35)'):(timerRunning?'var(--acc)':'var(--bdS)');
+  const tickMajorOff=themed?'rgba(255,255,255,.15)':'.4';
+  // Rebuild ticks with theme-aware colors
+  const thTicks=Array.from({length:60},(_,i)=>{
+    const angle=(i/60)*360-90,rad=angle*Math.PI/180,isMajor=i%5===0;
+    const outerR=97,innerR=isMajor?91:93;
+    const x1=110+outerR*Math.cos(rad),y1=110+outerR*Math.sin(rad);
+    const x2=110+innerR*Math.cos(rad),y2=110+innerR*Math.sin(rad);
+    const filled=pct>0&&(i/60)*100<=pct;
+    return`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${filled?tickOn:tickOff}" stroke-width="${isMajor?'1.5':'0.8'}" stroke-linecap="round" opacity="${filled?'1':isMajor?tickMajorOff:'.2'}"/>`;
+  }).join('');
+
   return`
   <div class="pg-title">Timer</div>
-  <div class="card timer-card${timerRunning?' timer-active':''}">
-    ${timerRunning?'<div class="timer-glow"></div>':''}
+  <div class="card timer-card${timerRunning?' timer-active':''}${timerElap>0&&!timerRunning?' timer-paused':''}${themed?' timer-themed':''}">
+    <div class="timer-bg">${themed?renderTimerBg(S.timerBg):''}</div>
     <div class="timer-face">
-      <div class="timer-ring-wrap" style="width:200px;height:200px;">
-        <svg class="timer-ring-svg" width="200" height="200" viewBox="0 0 200 200">
-          <circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--srf2)" stroke-width="5"/>
-          ${timerRunning||timerElap>0?`<circle cx="100" cy="100" r="${R}" fill="none" stroke="${timerRunning?'var(--acc)':'var(--bdS)'}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;filter:${timerRunning?'drop-shadow(0 0 8px rgba(192,90,48,.35))':'none'};"/>`
-          :`<circle cx="100" cy="100" r="${R}" fill="none" stroke="var(--bdS)" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${CIRC}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;"/>`}
+      <div class="timer-ring-wrap">
+        <svg class="timer-ring-svg" width="220" height="220" viewBox="0 0 220 220">
+          <defs>
+            <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="${themed?'rgba(255,255,255,.9)':'var(--acc)'}"/>
+              <stop offset="100%" stop-color="${themed?(pct>50?'rgba(180,230,180,.9)':'rgba(255,200,150,.9)'):(pct>50?'var(--ok)':'var(--accD)')}"/>
+            </linearGradient>
+            <filter id="ring-glow">
+              <feGaussianBlur stdDeviation="3" result="blur"/>
+              <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+          </defs>
+          ${thTicks}
+          <circle cx="110" cy="110" r="${R}" fill="none" stroke="${trackCol}" stroke-width="4.5" opacity=".5"/>
+          <circle cx="110" cy="110" r="${R}" fill="none" stroke="${timerRunning?'url(#ring-grad)':(themed?'rgba(255,255,255,.25)':'var(--bdS)')}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;"${timerRunning?' filter="url(#ring-glow)"':''}/>
+          ${(timerRunning||timerElap>0)&&pct>0?`<circle cx="${dotX.toFixed(1)}" cy="${dotY.toFixed(1)}" r="${timerRunning?'5':'3.5'}" fill="${timerRunning?(themed?'#fff':'var(--acc)'):(themed?'rgba(255,255,255,.4)':'var(--bdS)')}" id="tt-dot" class="${timerRunning?'tt-dot-pulse':''}" style="transition:cx .5s linear,cy .5s linear,r .2s ease;"/>
+          ${timerRunning?`<circle cx="${dotX.toFixed(1)}" cy="${dotY.toFixed(1)}" r="10" fill="${themed?'rgba(255,255,255,.12)':'var(--acc)'}" opacity=".15" id="tt-dot-glow" style="transition:cx .5s linear,cy .5s linear;"/>`:''}`:''
+          }
         </svg>
         <div class="timer-ring-center">
-          <div class="timer-num${timerRunning?' run':''}" id="tt-time">${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}</div>
-          <div class="timer-status" id="tt-lbl">${timerRunning?'Focus time':timerElap>0?'Paused':'Ready'}</div>
+          <div class="timer-num${timerRunning?' run':''}" id="tt-time">${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}</div>
+          <div class="timer-status" id="tt-lbl">${statusLabel}</div>
+          ${timerElap>0?`<div class="timer-pct" id="tt-pct">${Math.round(pct)}%</div>`:''}
         </div>
       </div>
     </div>
-    ${timerElap>0?`<div class="timer-elapsed-bar">
-      <span>${elapMin}m elapsed</span>
-      <span>${Math.round(pct)}%</span>
-    </div>`:''}
-    <div class="tbtns" style="margin-top:${timerElap>0?'12px':'20px'};">
+    <div class="timer-controls">
       ${timerRunning
-        ?`<button class="tbtn tbtn-s" data-action="timer-pause">Pause</button>`
-        :`<button class="tbtn tbtn-p" data-action="timer-start">${timerElap>0?'Resume':'Start'}</button>`}
-      <button class="tbtn tbtn-s" data-action="timer-reset">Reset</button>
+        ?`<button class="timer-btn timer-btn-pause${themed?' themed':''}" data-action="timer-pause"><span class="timer-btn-icon">❚❚</span>Pause</button>`
+        :`<button class="timer-btn timer-btn-start${themed?' themed':''}" data-action="timer-start"><span class="timer-btn-icon">▶</span>${timerElap>0?'Resume':'Start'}</button>`}
+      <button class="timer-btn timer-btn-reset${themed?' themed':''}" data-action="timer-reset"><span class="timer-btn-icon">↺</span>Reset</button>
     </div>
-    ${timerElap>0&&!timerRunning?`<button class="tbtn tbtn-log timer-log-btn" data-action="open-log">Log ${fmtDur(Math.ceil(timerElap/60))} session →</button>`:''}
+    ${timerElap>0&&!timerRunning?`<button class="timer-log-cta" data-action="open-log">Log ${fmtDur(Math.ceil(timerElap/60))} session →</button>`:''}
   </div>
 
   <div class="card timer-presets-card">
@@ -2942,11 +3391,32 @@ function renderTimer(){
       const c=getSubjColor(sub);
       return`<div class="timer-today-row">
         <div class="timer-today-dot" style="background:${c.bg};border:1px solid ${c.bd};"></div>
-        <span class="timer-today-name">${sub.name}</span>
+        <span class="timer-today-name">${esc(sub.name)}</span>
         <span class="timer-today-dur">${fmtDur(ss.duration)}</span>
       </div>`;
     }).join('')}</div>`
     :`<div class="timer-today-empty">No sessions yet today — start your first one above</div>`}
+  </div>
+
+  <div class="card timer-ambiance-card">
+    <div class="sec mb8"><span class="sec-lbl">Ambiance</span>${S.timerBg!=='none'?`<span class="amb-sound-toggle" data-action="toggle-timer-audio">${S.timerAudio?'🔊 Sound on':'🔇 Sound off'}</span>`:''}</div>
+    <div class="amb-grid">
+      <div class="amb-opt${S.timerBg==='none'?' on':''}" data-action="set-timer-bg" data-bg="none">
+        <div class="amb-icon">◯</div><div class="amb-label">None</div>
+      </div>
+      <div class="amb-opt${S.timerBg==='forest'?' on':''}" data-action="set-timer-bg" data-bg="forest">
+        <div class="amb-preview amb-prev-forest"></div>
+        <div class="amb-label">Forest</div>
+      </div>
+      <div class="amb-opt${S.timerBg==='cafe'?' on':''}" data-action="set-timer-bg" data-bg="cafe">
+        <div class="amb-preview amb-prev-cafe"></div>
+        <div class="amb-label">Jazz Cafe</div>
+      </div>
+      <div class="amb-opt${S.timerBg==='ocean'?' on':''}" data-action="set-timer-bg" data-bg="ocean">
+        <div class="amb-preview amb-prev-ocean"></div>
+        <div class="amb-label">Ocean</div>
+      </div>
+    </div>
   </div>
 
   ${!timerRunning&&timerElap===0?`<div class="card timer-tip">
@@ -3550,12 +4020,14 @@ function renderSessRow(s){
   const sub=S.data.subjects.find(x=>x.id===s.subject)||{name:s.subject,abbr:'?',color:0};
   const c=getSubjColor(sub);
   const dots=Array.from({length:5},(_,i)=>`<div class="cdot${i<s.confidence?' on':''}"></div>`).join('');
-  const topicBadge=s.topic?`<span class="sess-topic">${s.topic}</span>`:'';
+  const topicBadge=s.topic?`<span class="sess-topic">${esc(s.topic)}</span>`:'';
+  const timeStr=s.ts?fmtTime(new Date(s.ts)):'';
+  const noteTrunc=s.note?(s.note.length>40?esc(s.note.slice(0,40))+'…':esc(s.note)):'';
   return`<div class="sess-row">
     <div class="sess-av" style="background:${c.bg};border-color:${c.bd};color:${c.tx};">${sub.abbr}</div>
     <div class="sess-inf">
-      <div class="sess-n">${sub.name}${topicBadge}</div>
-      <div class="sess-m">${fmtDate(s.date)}${s.note?' · '+s.note:''}</div>
+      <div class="sess-n">${esc(sub.name)}${topicBadge}</div>
+      <div class="sess-m">${fmtDate(s.date)}${timeStr?' · '+timeStr:''}${noteTrunc?' · '+noteTrunc:''}</div>
     </div>
     <div class="sess-right"><div class="sess-dur">${fmtDur(s.duration)}</div><div class="cdots">${dots}</div></div>
     <div class="test-actions">
@@ -3569,20 +4041,17 @@ function renderSessRow(s){
 /* ════════════════════════════════
    MODALS
 ════════════════════════════════ */
-function updateLogPreview(){
+function updateLogSubmitText(){
   const effDur=S.logCustom&&parseInt(S.logCustom)>0?parseInt(S.logCustom):S.logDur;
   const selSub=S.data?.subjects.find(s=>s.id===S.logSub);
-  // Update preview card
-  const prevDur=document.querySelector('.log-preview-dur');
-  if(prevDur)prevDur.textContent=fmtDur(effDur);
-  const prevConf=document.querySelector('.log-preview-conf');
-  if(prevConf)prevConf.textContent=`${CE[S.logConf-1]||'🙂'} ${CONF[S.logConf-1]||'OK'}`;
-  // Update submit button text
   const btn=document.querySelector('.log-submit');
   if(btn&&selSub){
-    btn.textContent=`Log ${fmtDur(effDur)} of ${selSub.name}`;
+    btn.textContent=S.editSessId?`Update ${selSub.name} session`:`Log ${fmtDur(effDur)} of ${selSub.name}`;
     btn.classList.add('ready');
   }
+  // Update compact dur display
+  const dv=document.querySelector('.log-dur-val');
+  if(dv)dv.textContent=fmtDur(effDur);
 }
 
 function renderModal(){
@@ -3719,101 +4188,115 @@ function renderLogModal(){
   const{subjects,sessions}=S.data;
   const tElap=timerElap>0&&!timerRunning?Math.max(5,Math.ceil(timerElap/60)):null;
   const selSub=subjects.find(s=>s.id===S.logSub);
-  const topics=selSub?getTopicsForSubject(selSub):[];
+  const modules=selSub?getModulesForSubject(selSub):[];
+  const selMod=modules.find(m=>m.name===S.logModule);
   const effDur=S.logCustom&&parseInt(S.logCustom)>0?parseInt(S.logCustom):S.logDur;
-
-  // Live preview data
-  const prevSubName=selSub?.name||'—';
-  const prevDur=fmtDur(effDur);
-  const prevConf=CE[S.logConf-1]||'🙂';
-  const prevTopic=S.logTopic||'';
   const isReady=!!S.logSub;
+  const subPicked=S.logStep==='detail'||S.logStep==='ready';
+  const isEdit=!!S.editSessId;
 
-  // Today's progress per subject
   function subProgress(sub){
     const m=subMinsToday(sessions,sub.id);
     return m>0?fmtDur(m):'';
   }
 
   return`<div class="overlay" data-action="close-modal-out">
-    <div class="modal">
+    <div class="modal log-modal">
       <div class="modal-header">
         <div class="mhandle" data-action="close-modal"></div>
         <div class="modal-close-x" data-action="close-modal">✕</div>
         <div style="display:flex;align-items:baseline;justify-content:space-between;">
-          <div class="mtitle">${S.editSessId?'Edit session':'Log a session'}</div>
+          <div class="mtitle">${isEdit?'Edit session':'Log a session'}</div>
           <div style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);letter-spacing:.08em;">${new Date().toLocaleDateString('en-AU',{weekday:'short',day:'numeric',month:'short'})}</div>
         </div>
-        <div class="msub">${tElap?`⏱ Timer ran for <strong>${fmtDur(tElap)}</strong> — duration pre-filled.`:'Even 15 minutes. Just log it.'}</div>
+        ${tElap?`<div class="msub">⏱ Timer ran for <strong>${fmtDur(tElap)}</strong> — duration pre-filled.</div>`:''}
       </div>
-      <div class="modal-body">
+      <div class="modal-body log-body">
 
-        ${isReady?`<div class="log-preview">
-          <div class="log-preview-row">
-            <span class="log-preview-sub" style="background:${getSubjColor(selSub).bg};color:${getSubjColor(selSub).tx};border-color:${getSubjColor(selSub).bd};">${selSub.abbr}</span>
-            <span class="log-preview-name">${prevSubName}</span>
-            ${prevTopic?`<span class="log-preview-topic">${prevTopic}</span>`:''}
+        ${subPicked&&selSub?`
+          <div class="log-sel-pill" data-action="log-change-sub">
+            <span class="log-sel-abb" style="background:${getSubjColor(selSub).bg};color:${getSubjColor(selSub).tx};border:1px solid ${getSubjColor(selSub).bd};">${selSub.abbr}</span>
+            <span class="log-sel-name">${selSub.name}</span>
+            ${S.logModule?`<span class="log-sel-mod">${S.logModule}</span>`:''}
+            <span class="log-sel-change">change</span>
           </div>
-          <div class="log-preview-stats">
-            <span class="log-preview-dur">${prevDur}</span>
-            <span class="log-preview-conf">${prevConf} ${CONF[S.logConf-1]}</span>
-          </div>
-        </div>`:''}
+        `:''}
 
-        <div class="mlbl">Subject</div>
-        <div class="sub-chips-grid">
-          ${subjects.map(sub=>{
-            const c=getSubjColor(sub);
-            const prog=subProgress(sub);
-            return`<div class="sub-chip-item${S.logSub===sub.id?' on':''}" data-action="sel-sub" data-sub="${sub.id}">
-              <div class="sub-chip-abb" style="${S.logSub===sub.id?'':'background:'+c.bg+';color:'+c.tx+';border-color:'+c.bd+';'}">${sub.abbr}</div>
-              <div style="flex:1;min-width:0;">
-                <div class="sub-chip-name">${sub.name}</div>
-                ${prog?`<div class="sub-chip-prog">${prog} today</div>`:''}
-              </div>
-            </div>`;
-          }).join('')}
+        <div class="log-section${subPicked&&!isEdit?' collapsed':''}">
+          <div class="mlbl">Subject</div>
+          <div class="sub-chips-grid">
+            ${subjects.map(sub=>{
+              const c=getSubjColor(sub);
+              const prog=subProgress(sub);
+              return`<div class="sub-chip-item${S.logSub===sub.id?' on':''}" data-action="sel-sub" data-sub="${sub.id}">
+                <div class="sub-chip-abb" style="${S.logSub===sub.id?'':'background:'+c.bg+';color:'+c.tx+';border-color:'+c.bd+';'}">${sub.abbr}</div>
+                <div style="flex:1;min-width:0;">
+                  <div class="sub-chip-name">${sub.name}</div>
+                  ${prog?`<div class="sub-chip-prog">${prog} today</div>`:''}
+                </div>
+              </div>`;
+            }).join('')}
+          </div>
         </div>
 
-          ${selSub&&topics.length?`
-            <div class="mlbl">Topic <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional</span></div>
-            <div class="topic-grid">
-              <div class="topic-chip${!S.logTopic?' on':''}" data-action="sel-topic" data-topic="">— Any</div>
-              ${topics.map(t=>`<div class="topic-chip${S.logTopic===t?' on':''}" data-action="sel-topic" data-topic="${t}">${t}</div>`).join('')}
+        ${subPicked&&selSub&&modules.length?`
+          <div class="log-section log-modules">
+            <div class="mlbl">Module <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional</span></div>
+            <div class="module-grid">
+              ${modules.map(m=>`<div class="module-chip${S.logModule===m.name?' on':''}" data-action="sel-module" data-module="${m.name}">${m.name}</div>`).join('')}
+            </div>
+          </div>
+          ${selMod&&selMod.iqs.length?`
+            <div class="log-section log-iqs">
+              <div class="mlbl">Inquiry Question <span style="color:var(--tx3);font-size:11px;font-weight:300;">optional</span></div>
+              <div class="iq-grid">
+                <div class="iq-chip${!S.logTopic?' on':''}" data-action="sel-topic" data-topic="">— Any</div>
+                ${selMod.iqs.map(iq=>`<div class="iq-chip${S.logTopic===iq?' on':''}" data-action="sel-topic" data-topic="${iq}">${iq}</div>`).join('')}
+              </div>
             </div>
           `:''}
+        `:''}
 
-        <div class="mlbl">Duration</div>
-        <div class="dur-grid">
-          ${PRESETS.map(d=>`<div class="dur-pill${S.logDur===d&&!S.logCustom?' on':''}" data-action="sel-dur" data-dur="${d}">${fmtDur(d)}</div>`).join('')}
-        </div>
-        <div class="sl-row">
-          <input type="range" min="5" max="240" step="5" value="${S.logDur}" id="dur-sl">
-          <div class="slval" id="dur-disp">${fmtDur(S.logDur)}</div>
-        </div>
-        <div class="cust-row">
-          <input type="number" id="cust-dur" placeholder="—" min="1" max="600" value="${S.logCustom}" inputmode="numeric">
-          <span>min (exact)</span>
-        </div>
+      </div>
 
-        <div class="mlbl">Date <span style="color:var(--tx3);font-size:11px;font-weight:300;">default today</span></div>
-        <input class="minp" id="log-date" type="date" value="${S.logDate||today()}" max="${today()}" style="margin-bottom:12px;">
-
-        <div class="mlbl" style="margin-top:2px;">How did it go?</div>
-        <div class="conf-grid">
-          ${CE.map((e,i)=>`<div class="conf-btn${S.logConf===i+1?' on':''}" data-action="sel-conf" data-conf="${i+1}">
-            <span class="conf-emoji">${e}</span>
-            <span class="conf-word">${CONF[i]}</span>
-          </div>`).join('')}
+      <div class="log-footer">
+        <div class="log-footer-row">
+          <div class="log-dur-compact${S._durOpen?' open':''}" data-action="log-toggle-dur">
+            <span class="log-dur-val">${fmtDur(effDur)}</span>
+          </div>
+          <div class="log-conf-strip">
+            ${CE.map((e,i)=>`<div class="log-conf-dot${S.logConf===i+1?' on':''}" data-action="sel-conf" data-conf="${i+1}" title="${CONF[i]}">${e}</div>`).join('')}
+          </div>
+          <div class="log-extras-toggle${S._extrasOpen?' open':''}" data-action="log-toggle-extras" title="Date & note">···</div>
         </div>
 
-        <div class="log-note-toggle" id="log-note-toggle" data-action="toggle-note">${S.logNote?'Note':'+ Add note'}</div>
-        <div class="log-note-wrap${S.logNote||S._noteOpen?' open':''}" id="log-note-wrap">
-          <textarea class="noteinp" id="log-note" placeholder="What did you cover? Any blockers?" maxlength="200">${S.logNote}</textarea>
+        <div class="log-dur-panel${S._durOpen?' open':''}">
+          <div class="dur-grid">
+            ${PRESETS.map(d=>`<div class="dur-pill${S.logDur===d&&!S.logCustom?' on':''}" data-action="sel-dur" data-dur="${d}">${fmtDur(d)}</div>`).join('')}
+          </div>
+          <div class="cust-row" style="margin-top:8px;">
+            <input type="number" id="cust-dur" placeholder="Custom" min="1" max="600" value="${S.logCustom}" inputmode="numeric">
+            <span>min</span>
+          </div>
         </div>
 
-        ${S.logErr?`<div class="merr">${S.logErr}</div>`:''}
-        <button class="log-submit${isReady?' ready':''}" data-action="submit-log">${isReady?(S.editSessId?`Update ${prevSubName} session`:`Log ${prevDur} of ${prevSubName}`):'Select a subject to log'}</button>
+        <div class="log-extras-panel${S._extrasOpen?' open':''}">
+          <div class="log-extras-inner">
+            <div class="log-extras-row">
+              <div style="flex:1;">
+                <div class="mlbl" style="margin-bottom:4px;">Date</div>
+                <input class="minp" id="log-date" type="date" value="${S.logDate||today()}" max="${today()}" style="margin-bottom:0;">
+              </div>
+            </div>
+            <div style="margin-top:10px;">
+              <div class="mlbl" style="margin-bottom:4px;">Note</div>
+              <textarea class="noteinp" id="log-note" placeholder="What did you cover?" maxlength="200" style="margin-bottom:0;height:52px;">${S.logNote}</textarea>
+            </div>
+          </div>
+        </div>
+
+        ${S.logErr?`<div class="merr" style="margin-bottom:8px;">${S.logErr}</div>`:''}
+        <button class="log-submit${isReady?' ready':''}" data-action="submit-log">${isReady?(isEdit?`Update ${selSub.name} session`:`Log ${fmtDur(effDur)} of ${selSub.name}`):'Select a subject'}</button>
       </div>
     </div>
   </div>`;
@@ -3847,17 +4330,17 @@ function renderAddSubjModal(){
    TOAST + FLASH
 ════════════════════════════════ */
 let toastTm=null;
-function showToast(msg,icon='✓'){
+function showToast(msg,icon='✓',html=false){
   const t=document.getElementById('toast');if(!t)return;
   document.getElementById('ti').textContent=icon;
   const tt=document.getElementById('tt');
-  if(tt){tt.innerHTML=msg;}
+  if(tt){if(html)tt.innerHTML=msg;else tt.textContent=msg;}
   t.classList.add('show');clearTimeout(toastTm);toastTm=setTimeout(()=>t.classList.remove('show'),4000);
 }
 let _undoAction=null;
 function showUndoToast(msg,undoFn){
   _undoAction=undoFn;
-  showToast(`${msg} <span class="undo-link" id="undo-btn">Undo</span>`,'✕');
+  showToast(`${esc(msg)} <span class="undo-link" id="undo-btn">Undo</span>`,'✕',true);
   // Attach click to undo
   setTimeout(()=>{
     const ub=document.getElementById('undo-btn');
@@ -3996,17 +4479,20 @@ const A={
     render();
   },
 
-  'nav-dashboard':()=>{S.view='dashboard';S.modal=null;S.moreMenu=false;render();},
-  'nav-timetable':()=>{S.view='timetable';S.modal=null;S.moreMenu=false;render();},
-  'nav-history':()=>{S.view='history';S.modal=null;render();},
-  'nav-stats':()=>{S.view='stats';S.modal=null;render();},
+  'nav-dashboard':()=>{navTo('dashboard');},
+  'nav-timetable':()=>{navTo('timetable');},
+  'nav-history':()=>{navTo('history');},
+  'nav-stats':()=>{navTo('stats');},
   'skip-break':()=>{skipBreak();},
-  'nav-timer':()=>{S.view='timer';S.modal=null;render();},
-  'nav-settings':()=>{S.view='settings';S.modal=null;render();},
+  'nav-timer':()=>{navTo('timer');},
+  'nav-settings':()=>{navTo('settings');},
   'nav-leaderboard':()=>{
     S.view='leaderboard';S.modal=null;S.moreMenu=false;
     if(!S.lbData&&!S.lbLoading){
-      S.lbLoading=true;render();
+      S.lbLoading=true;
+      const content=document.getElementById('page-content');
+      if(content)content.scrollTop=0;
+      render();
       lbPush().then(()=>lbGetCached(true)).then(d=>{
         S.lbData=d;S.lbLoading=false;
         // Pre-fetch teams if user has any
@@ -4139,71 +4625,74 @@ const A={
   'tt-tab':(btn)=>{S.ttTab=parseInt(btn.dataset.tab);render();},
 
   'open-log':()=>{
-    S.modal='log';S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;S._noteOpen=false;S.logDate='';S.editSessId=null;
+    S.modal='log';S.logNote='';S.logErr='';S.logCustom='';S.logModule=null;S.logTopic=null;S._durOpen=false;S._extrasOpen=false;S.logDate='';S.editSessId=null;S.logConf=3;
     S.logDur=timerElap>0&&!timerRunning?Math.max(5,Math.ceil(timerElap/60)):45;
     S.logSub=S.data.timetable?getSmartSubject(S.data.timetable,S.data.subjects):null;
+    S.logStep=S.logSub?'detail':'subject';
     document.body.classList.add('modal-open');render();
   },
-  'quick-log':(btn)=>{S.modal='log';S.logSub=btn.dataset.subject;S.logDur=45;S.logConf=3;S.logNote='';S.logErr='';S.logCustom='';S.logTopic=null;S._noteOpen=false;S.logDate='';S.editSessId=null;document.body.classList.add('modal-open');render();},
+  'quick-log':(btn)=>{S.modal='log';S.logSub=btn.dataset.subject;S.logDur=45;S.logConf=3;S.logNote='';S.logErr='';S.logCustom='';S.logModule=null;S.logTopic=null;S._durOpen=false;S._extrasOpen=false;S.logDate='';S.editSessId=null;S.logStep='detail';document.body.classList.add('modal-open');render();},
   'relog':(btn)=>{
     const s=(S.data.sessions||[]).find(x=>x.id===btn.dataset.id);if(!s)return;
-    S.modal='log';S.logSub=s.subject;S.logDur=s.duration;S.logConf=s.confidence||3;S.logTopic=s.topic||null;S.logNote='';S.logErr='';S.logCustom='';S._noteOpen=false;S.logDate='';S.editSessId=null;
+    S.modal='log';S.logSub=s.subject;S.logDur=s.duration;S.logConf=s.confidence||3;S.logModule=s.module||null;S.logTopic=s.topic||null;S.logNote='';S.logErr='';S.logCustom='';S._durOpen=false;S._extrasOpen=false;S.logDate='';S.editSessId=null;S.logStep='detail';
     document.body.classList.add('modal-open');render();
   },
   'edit-sess':(btn)=>{
     const s=(S.data.sessions||[]).find(x=>x.id===btn.dataset.id);if(!s)return;
-    S.modal='log';S.editSessId=s.id;S.logSub=s.subject;S.logDur=s.duration;S.logConf=s.confidence||3;S.logTopic=s.topic||null;S.logNote=s.note||'';S.logErr='';S.logCustom='';S._noteOpen=!!s.note;S.logDate=s.date||'';
+    S.modal='log';S.editSessId=s.id;S.logSub=s.subject;S.logDur=s.duration;S.logConf=s.confidence||3;S.logModule=s.module||null;S.logTopic=s.topic||null;S.logNote=s.note||'';S.logErr='';S.logCustom='';S._durOpen=false;S._extrasOpen=!!(s.note||(s.date&&s.date!==today()));S.logDate=s.date||'';S.logStep='detail';
     document.body.classList.add('modal-open');render();
   },
   'close-modal':()=>{closeModalSmooth();},
   'close-modal-out':(btn,e)=>{if(e.target.classList.contains('overlay'))closeModalSmooth();},
 
   'sel-sub':(btn)=>{
-    S.logSub=btn.dataset.sub;S.logTopic=null;
-    document.querySelectorAll('[data-action=sel-sub]').forEach(el=>el.classList.toggle('on',el.dataset.sub===S.logSub));
-    document.querySelectorAll('.sub-chip-abb').forEach(el=>{
-      const item=el.closest('[data-action=sel-sub]');
-      if(!item)return;
-      const sub=S.data.subjects.find(s=>s.id===item.dataset.sub);
-      if(!sub)return;
-      const c=getSubjColor(sub);
-      if(item.dataset.sub===S.logSub){el.style.background='var(--acc)';el.style.color='#fff';el.style.borderColor='var(--acc)';}
-      else{el.style.background=c.bg;el.style.color=c.tx;el.style.borderColor=c.bd;}
-    });
-    // Re-render topic section only
-    const modal=document.querySelector('.modal-body');
-    if(modal){
-      // Update topic section visibility by re-rendering the modal
-      // Simple approach: re-render the modal
-      const overlay=document.querySelector('.overlay');
-      if(overlay){overlay.outerHTML=renderLogModal();}
-    }
+    S.logSub=btn.dataset.sub;S.logModule=null;S.logTopic=null;S.logStep='detail';
+    const overlay=document.querySelector('.overlay');
+    if(overlay){overlay.outerHTML=renderLogModal();}
+  },
+  'log-change-sub':()=>{
+    S.logStep='subject';S.logModule=null;S.logTopic=null;
+    const overlay=document.querySelector('.overlay');
+    if(overlay){overlay.outerHTML=renderLogModal();}
+  },
+  'log-toggle-dur':()=>{
+    S._durOpen=!S._durOpen;
+    document.querySelector('.log-dur-panel')?.classList.toggle('open',S._durOpen);
+    document.querySelector('.log-dur-compact')?.classList.toggle('open',S._durOpen);
+  },
+  'log-toggle-extras':()=>{
+    S._extrasOpen=!S._extrasOpen;
+    document.querySelector('.log-extras-panel')?.classList.toggle('open',S._extrasOpen);
+    document.querySelector('.log-extras-toggle')?.classList.toggle('open',S._extrasOpen);
+    if(S._extrasOpen)setTimeout(()=>document.getElementById('log-note')?.focus(),100);
   },
   'sel-dur':(btn)=>{
     S.logDur=parseInt(btn.dataset.dur);S.logCustom='';
-    document.querySelectorAll('.dchip,.dur-pill').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.dur)===S.logDur));
-    const sl=document.getElementById('dur-sl');if(sl)sl.value=S.logDur;
-    const dd=document.getElementById('dur-disp');if(dd)dd.textContent=fmtDur(S.logDur);
+    document.querySelectorAll('.dur-pill').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.dur)===S.logDur));
     const ci=document.getElementById('cust-dur');if(ci)ci.value='';
-    updateLogPreview();
+    updateLogSubmitText();
+    // Auto-close duration panel
+    setTimeout(()=>{
+      S._durOpen=false;
+      document.querySelector('.log-dur-panel')?.classList.remove('open');
+      document.querySelector('.log-dur-compact')?.classList.remove('open');
+    },250);
   },
   'sel-conf':(btn)=>{
     S.logConf=parseInt(btn.dataset.conf);
-    document.querySelectorAll('[data-action=sel-conf]').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.conf)===S.logConf));
-    updateLogPreview();
+    document.querySelectorAll('.log-conf-dot').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.conf)===S.logConf));
   },
 
+  'sel-module':(btn)=>{
+    const mod=btn.dataset.module||null;
+    S.logModule=S.logModule===mod?null:mod;
+    S.logTopic=null;
+    const overlay=document.querySelector('.overlay');
+    if(overlay){overlay.outerHTML=renderLogModal();}
+  },
   'sel-topic':(btn)=>{
     S.logTopic=btn.dataset.topic||null;
-    document.querySelectorAll('.topic-chip').forEach(el=>el.classList.toggle('on',el.dataset.topic===btn.dataset.topic));
-  },
-  'toggle-note':()=>{
-    S._noteOpen=!S._noteOpen;
-    const wrap=document.getElementById('log-note-wrap');
-    const tog=document.getElementById('log-note-toggle');
-    if(wrap){wrap.classList.toggle('open',S._noteOpen);}
-    if(tog&&S._noteOpen){tog.textContent='Note';}
-    if(S._noteOpen)setTimeout(()=>document.getElementById('log-note')?.focus(),100);
+    document.querySelectorAll('.iq-chip').forEach(el=>el.classList.toggle('on',el.dataset.topic===btn.dataset.topic));
   },
 
   'submit-log':()=>{
@@ -4219,20 +4708,21 @@ const A={
       // Update existing session
       const idx=S.data.sessions.findIndex(x=>x.id===S.editSessId);
       if(idx>=0){
-        S.data.sessions[idx]={...S.data.sessions[idx],subject:S.logSub,duration:dur,confidence:S.logConf,note,topic:S.logTopic||null,date:logDate};
+        S.data.sessions[idx]={...S.data.sessions[idx],subject:S.logSub,duration:dur,confidence:S.logConf,note,module:S.logModule||null,topic:S.logTopic||null,date:logDate};
       }
       saveLocal(S.data);triggerSync();triggerLbPush();
-      S.modal=null;S.logTopic=null;S.editSessId=null;document.body.classList.remove('modal-open');
+      S.modal=null;S.logModule=null;S.logTopic=null;S.editSessId=null;document.body.classList.remove('modal-open');
       render();showToast('Session updated.','✓');
       return;
     }
-    const sess={id:uid(),date:logDate,subject:S.logSub,duration:dur,confidence:S.logConf,note,topic:S.logTopic||null,ts:Date.now()};
+    const sess={id:uid(),date:logDate,subject:S.logSub,duration:dur,confidence:S.logConf,note,module:S.logModule||null,topic:S.logTopic||null,ts:Date.now()};
     S.data.sessions.push(sess);saveLocal(S.data);triggerSync();triggerLbPush();
-    S.modal=null;S.logTopic=null;S.editSessId=null;document.body.classList.remove('modal-open');
+    S.modal=null;S.logModule=null;S.logTopic=null;S.editSessId=null;document.body.classList.remove('modal-open');
     const sub=S.data.subjects.find(x=>x.id===S.logSub);
+    const modStr=sess.module?` · ${sess.module}`:'';
     const topicStr=sess.topic?` · ${sess.topic}`:'';
     const msgs=[
-      `${sub?.name}${topicStr} — ${fmtDur(dur)} logged.`,
+      `${sub?.name}${modStr} — ${fmtDur(dur)} logged.`,
       `${fmtDur(dur)} of ${sub?.name}. Streak: ${getStreak(S.data.sessions)} days.`,
       `${sub?.name} ✓${topicStr}`,
       `${fmtDur(dur)} closer to 99.95.`
@@ -4240,8 +4730,9 @@ const A={
     render();flashGreen();showToast(msgs[Math.floor(Math.random()*msgs.length)]);
     // Retrieval practice nudge — after every ~3rd session, prompt recall
     const sessCount=S.data.sessions.filter(s=>s.subject!=='grace').length;
-    if(sessCount%3===0&&sess.topic){
-      setTimeout(()=>showToast(`Quick recall: Can you name 3 key things from ${sess.topic}? Just thinking about it boosts retention.`,'🧠'),2500);
+    const recallLabel=sess.topic||sess.module;
+    if(sessCount%3===0&&recallLabel){
+      setTimeout(()=>showToast(`Quick recall: Can you name 3 key things from ${recallLabel}? Just thinking about it boosts retention.`,'🧠'),2500);
     } else {
       // Variable reward — 25% chance of bonus message
       const bonus=getVariableReward();
@@ -4264,19 +4755,18 @@ const A={
     else{S.moreMenu=true;render();}
   },
   'close-more':()=>{closeMoreSmooth();},
-  'more-nav':(btn)=>{const v=btn.dataset.view;S.view=v;S.moreMenu=false;S.modal=null;render();if(v==='papers'&&!S.papersData&&!S.papersLoading){S.papersLoading=true;loadPapersData().then(d=>{S.papersData=d;S.papersLoading=false;if(S.view==='papers')render();});}if(v==='leaderboard'&&!S.lbData&&!S.lbLoading){S.lbLoading=true;render();lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;if(S.view==='leaderboard')render();});}},
-  'nav-progress':()=>{S.view='progress';S.modal=null;S.moreMenu=false;render();},
+  'more-nav':(btn)=>{const v=btn.dataset.view;S.moreMenu=false;S.modal=null;navTo(v);if(v==='papers'&&!S.papersData&&!S.papersLoading){S.papersLoading=true;loadPapersData().then(d=>{S.papersData=d;S.papersLoading=false;if(S.view==='papers')render();});}if(v==='leaderboard'&&!S.lbData&&!S.lbLoading){S.lbLoading=true;render();lbPush().then(()=>lbGetCached(true)).then(d=>{S.lbData=d;S.lbLoading=false;if(S.view==='leaderboard')render();});}},
+  'nav-progress':()=>{navTo('progress');},
   'prog-tab':(btn)=>{S.progTab=parseInt(btn.dataset.tab);render();},
 
   // ── Papers library ──
   'nav-papers':()=>{
-    S.view='papers';S.modal=null;S.moreMenu=false;
     // Kick off load if not cached
     if(!S.papersData && !S.papersLoading){
       S.papersLoading=true;
       loadPapersData().then(d=>{S.papersData=d;S.papersLoading=false;if(S.view==='papers')render();});
     }
-    render();
+    navTo('papers');
     // Render thumbs after paint
     setTimeout(renderPaperThumbs, 200);
   },
@@ -4487,9 +4977,23 @@ const A={
 
   // Timer
   'set-timer':(btn)=>{timerTarget=parseInt(btn.dataset.dur)*60;resetTimer();render();},
-  'timer-start':()=>{startTimer();renderTimerFast();},
-  'timer-pause':()=>{pauseTimer();render();},
-  'timer-reset':()=>{resetTimer();render();},
+  'timer-start':()=>{startTimer();if(S.timerBg!=='none'&&S.timerAudio)Ambient.play(S.timerBg);render();},
+  'timer-pause':()=>{pauseTimer();Ambient.stop();render();},
+  'timer-reset':()=>{resetTimer();Ambient.stop();render();},
+  'set-timer-bg':(btn)=>{
+    S.timerBg=btn.dataset.bg||'none';
+    localStorage.setItem('mer_timer_bg',S.timerBg);
+    if(timerRunning&&S.timerBg!=='none'&&S.timerAudio)Ambient.play(S.timerBg);
+    else Ambient.stop();
+    render();
+  },
+  'toggle-timer-audio':()=>{
+    S.timerAudio=!S.timerAudio;
+    localStorage.setItem('mer_timer_audio',S.timerAudio?'1':'0');
+    if(!S.timerAudio)Ambient.stop();
+    else if(timerRunning&&S.timerBg!=='none')Ambient.play(S.timerBg);
+    render();
+  },
 
   // Settings
   'save-account':()=>{
@@ -4733,19 +5237,13 @@ function attach(){
       }
       return;
     }
-    if(e.target.id==='dur-sl'){
-      S.logDur=parseInt(e.target.value);S.logCustom='';
-      const d=document.getElementById('dur-disp');if(d)d.textContent=fmtDur(S.logDur);
-      document.querySelectorAll('.dchip,.dur-pill').forEach(el=>el.classList.toggle('on',parseInt(el.dataset.dur)===S.logDur));
-      const ci=document.getElementById('cust-dur');if(ci)ci.value='';
-      updateLogPreview();
-    }
     if(e.target.id==='cust-dur'){
       S.logCustom=e.target.value;const v=parseInt(e.target.value);
-      if(v>0){document.querySelectorAll('.dchip,.dur-pill').forEach(el=>el.classList.remove('on'));const d=document.getElementById('dur-disp');if(d)d.textContent=fmtDur(v);const sl=document.getElementById('dur-sl');if(sl)sl.value=Math.min(240,v);}
-      updateLogPreview();
+      if(v>0){document.querySelectorAll('.dur-pill').forEach(el=>el.classList.remove('on'));}
+      updateLogSubmitText();
     }
     if(e.target.id==='log-note')S.logNote=e.target.value;
+    if(e.target.id==='log-date')S.logDate=e.target.value;
     if(e.target.id==='li-pin')S.loginPin=e.target.value;
     if(e.target.id==='import-code'){S.importCode=e.target.value;}
     if(e.target.id==='reg-name')S.loginName=e.target.value;
@@ -4799,10 +5297,10 @@ function attach(){
   document.addEventListener('keydown',e=>{
     const noInput=!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
     if(e.key==='l'&&!S.modal&&S.data&&noInput){A['open-log']();}
-    if(e.key==='t'&&!S.modal&&S.data&&noInput){S.view='timer';S.modal=null;render();return;}
-    if(e.key==='d'&&!S.modal&&S.data&&noInput){S.view='dashboard';S.modal=null;render();return;}
-    if(e.key==='p'&&!S.modal&&S.data&&noInput){S.view='progress';S.modal=null;render();return;}
-    if(e.key==='h'&&!S.modal&&S.data&&noInput){S.view='history';S.modal=null;render();return;}
+    if(e.key==='t'&&!S.modal&&S.data&&noInput){navTo('timer');return;}
+    if(e.key==='d'&&!S.modal&&S.data&&noInput){navTo('dashboard');return;}
+    if(e.key==='p'&&!S.modal&&S.data&&noInput){navTo('progress');return;}
+    if(e.key==='h'&&!S.modal&&S.data&&noInput){navTo('history');return;}
     if(e.key==='Escape'){
       if(pdfViewerState){A['close-pdf']();return;}
       if(S.modal){closeModalSmooth();return;}
