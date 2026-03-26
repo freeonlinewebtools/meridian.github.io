@@ -836,7 +836,7 @@ function renderBreakFast(){const rem=Math.max(0,breakTarget-breakElap),m=Math.fl
 function skipBreak(){clearInterval(breakInt);S.pomodoroBreak=false;render();}
 function pauseTimer(){clearInterval(timerInt);timerRunning=false;timerElap=Math.floor((Date.now()-timerStart)/1000);}
 function resetTimer(){clearInterval(timerInt);timerRunning=false;timerElap=0;renderTimerFast();}
-function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const pct=Math.min(100,(timerElap/timerTarget)*100);const t=document.getElementById('tt-time');if(t){t.innerHTML=`${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const l=document.getElementById('tt-lbl');if(l){const focusLabels=['Ready','Focus time','In the zone','Deep focus','Unstoppable'];const fi=timerRunning?Math.min(4,Math.floor(timerElap/600)):0;l.textContent=timerRunning?focusLabels[fi]:timerElap>0?'Paused':'Ready';}const pc=document.getElementById('tt-pct');if(pc)pc.textContent=Math.round(pct)+'%';const R=88,CIRC=2*Math.PI*R;const ring=document.getElementById('tt-ring');if(ring){ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=timerRunning?'url(#ring-grad)':'var(--bdS)';ring.setAttribute('filter',timerRunning?'url(#ring-glow)':'');}const dotAngle=((pct/100)*360-90)*Math.PI/180;const dotX=110+R*Math.cos(dotAngle),dotY=110+R*Math.sin(dotAngle);const dot=document.getElementById('tt-dot');if(dot){dot.setAttribute('cx',dotX.toFixed(1));dot.setAttribute('cy',dotY.toFixed(1));}const dotG=document.getElementById('tt-dot-glow');if(dotG){dotG.setAttribute('cx',dotX.toFixed(1));dotG.setAttribute('cy',dotY.toFixed(1));}}
+function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const pct=Math.min(100,(timerElap/timerTarget)*100);const t=document.getElementById('tt-time');if(t){t.innerHTML=`${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const l=document.getElementById('tt-lbl');if(l){const focusLabels=['Ready','Focus time','In the zone','Deep focus','Unstoppable'];const fi=timerRunning?Math.min(4,Math.floor(timerElap/600)):0;l.textContent=timerRunning?focusLabels[fi]:timerElap>0?'Paused':'Ready';}const pc=document.getElementById('tt-pct');if(pc)pc.textContent=Math.round(pct)+'%';const R=88,CIRC=2*Math.PI*R;const ring=document.getElementById('tt-ring');if(ring){const themed=document.querySelector('.timer-themed');ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=timerRunning?'url(#ring-grad)':(themed?'rgba(255,255,255,.25)':'var(--bdS)');ring.setAttribute('filter',timerRunning?'url(#ring-glow)':'');}const dotAngle=((pct/100)*360-90)*Math.PI/180;const dotX=110+R*Math.cos(dotAngle),dotY=110+R*Math.sin(dotAngle);const dot=document.getElementById('tt-dot');if(dot){dot.setAttribute('cx',dotX.toFixed(1));dot.setAttribute('cy',dotY.toFixed(1));}const dotG=document.getElementById('tt-dot-glow');if(dotG){dotG.setAttribute('cx',dotX.toFixed(1));dotG.setAttribute('cy',dotY.toFixed(1));}}
 
 /* ════════════════════════════════
    AMBIENT AUDIO ENGINE
@@ -1248,6 +1248,11 @@ let S={
   papersSort:'date',        // 'date' / 'subject' / 'title'
   papersData:null,          // loaded papers cache {local:[], thsc:[], hsc:[]}
   papersLoading:false,
+  // History filters
+  histSubFilter:'All',
+  histConfFilter:'All',
+  // Stats range
+  statsRange:'all',
   moreMenu:false,           // mobile "more" menu open
   // Leaderboard
   lbTab:0,                   // 0=rankings, 1=head-to-head, 2=teams
@@ -1267,6 +1272,8 @@ let S={
   pomodoroCount:0,           // completed pomodoros this session
   timerBg:localStorage.getItem('mer_timer_bg')||'none',  // 'none'|'forest'|'cafe'|'ocean'
   timerAudio:localStorage.getItem('mer_timer_audio')!=='0', // sound on/off
+  timerFont:localStorage.getItem('mer_timer_font')||'default', // timer number font
+  timerFocus:false, // fullscreen focus mode
 };
 
 /* ════════════════════════════════
@@ -1286,6 +1293,7 @@ function render(){
   const root=document.getElementById('app');
   if(!S.data){root.innerHTML=renderLogin();return;}
   if(S.view!=='timer')Ambient.stop();
+  if(S.timerFocus&&S.view==='timer'){root.innerHTML=renderTimerFocus();renderTimerFast();return;}
   root.innerHTML=renderShell();
   // Scroll to top on view change
   const content=document.getElementById('page-content');
@@ -1490,9 +1498,9 @@ function renderRegister(){
   if(step===1){
     stepContent = `
       <div class="auth-step-panel">
-        <div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);margin-bottom:10px;">Step 1 of 4 — Your name</div>
-        <div style="font-family:'Cormorant',serif;font-size:28px;font-weight:300;color:var(--tx);margin-bottom:6px;">What should we call you?</div>
-        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:24px;line-height:1.5;">This shows on your dashboard greeting and won't be shared with anyone.</div>
+        <div class="reg-step-label">Step 1 of 4 — Your name</div>
+        <div class="reg-step-title">What should we call you?</div>
+        <div class="reg-step-desc mb24">This shows on your dashboard greeting and won't be shared with anyone.</div>
         <div class="fld">
           <label class="flbl">First name</label>
           <input class="fi" id="reg-name" type="text" placeholder="Name Here" value="${esc(S.loginName)}" autocomplete="off" autocorrect="off" autocapitalize="words" style="font-size:18px;padding:14px 16px;">
@@ -1515,9 +1523,9 @@ function renderRegister(){
   } else if(step===2){
     stepContent = `
       <div class="auth-step-panel">
-        <div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);margin-bottom:10px;">Step 2 of 4 — Security</div>
-        <div style="font-family:'Cormorant',serif;font-size:28px;font-weight:300;color:var(--tx);margin-bottom:6px;">Create a PIN</div>
-        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:28px;line-height:1.5;">4 digits to unlock Meridian on this device. Your data stays local — use Cloud Sync in Settings to access it elsewhere.</div>
+        <div class="reg-step-label">Step 2 of 4 — Security</div>
+        <div class="reg-step-title">Create a PIN</div>
+        <div class="reg-step-desc mb28">4 digits to unlock Meridian on this device. Your data stays local — use Cloud Sync in Settings to access it elsewhere.</div>
         <div class="pin-row">
           ${[0,1,2,3].map(i=>`<input class="pin-digit" id="pd-${i}" type="password" inputmode="numeric" maxlength="1" placeholder="·" data-idx="${i}">`).join('')}
         </div>
@@ -1529,9 +1537,9 @@ function renderRegister(){
   } else if(step===3){
     stepContent = `
       <div class="auth-step-panel">
-        <div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);margin-bottom:10px;">Step 3 of 4 — School year</div>
-        <div style="font-family:'Cormorant',serif;font-size:28px;font-weight:300;color:var(--tx);margin-bottom:6px;">What year are you in?</div>
-        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:24px;line-height:1.5;">Sets your exam countdown and study targets.</div>
+        <div class="reg-step-label">Step 3 of 4 — School year</div>
+        <div class="reg-step-title">What year are you in?</div>
+        <div class="reg-step-desc mb24">Sets your exam countdown and study targets.</div>
         <div class="year-grid">
           ${[7,8,9,10,11,12].map(y=>`<div class="year-btn${S.regYear===y?' on':''}" data-action="sel-year" data-year="${y}">Year ${y}</div>`).join('')}
         </div>
@@ -1542,9 +1550,9 @@ function renderRegister(){
     const selSet = new Set(S.regSubjects);
     stepContent = `
       <div class="auth-step-panel">
-        <div style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.14em;text-transform:uppercase;color:var(--tx3);margin-bottom:10px;">Step 4 of 4 — Your subjects</div>
-        <div style="font-family:'Cormorant',serif;font-size:28px;font-weight:300;color:var(--tx);margin-bottom:6px;">What are you studying?</div>
-        <div style="font-size:13px;color:var(--tx3);font-weight:300;margin-bottom:18px;line-height:1.5;">Pick at least one subject. You can add or remove them later in Settings.</div>
+        <div class="reg-step-label">Step 4 of 4 — Your subjects</div>
+        <div class="reg-step-title">What are you studying?</div>
+        <div class="reg-step-desc mb18">Pick at least one subject. You can add or remove them later in Settings.</div>
         <div class="subj-select-grid" style="max-height:min(320px,50vh);overflow-y:auto;-webkit-overflow-scrolling:touch;">
           ${ALL_PRESET_SUBS.map(sub=>{
             const c = getSubjColor(sub);
@@ -1703,7 +1711,6 @@ function renderNowNext(){
         <div style="height:3px;background:rgba(58,120,85,.2);border-radius:2px;margin-top:8px;overflow:hidden;"><div data-period-prog data-start="${nn.ev.start}" data-end="${nn.ev.end}" style="width:${pct}%;height:100%;background:var(--ok);border-radius:2px;transition:width 2s linear;"></div></div>
       </div>
       <div id="live-countdown" class="live-time">${nn.mLeft}m<br><span style="font-size:12px;font-family:'DM Sans',sans-serif;font-weight:300;color:var(--ok);">left</span></div>
-      <div class="live-action" data-action="quick-log" data-subject="${nn.ev.subjectId}">Log it</div>
     </div>`;
   }
   if(nn.type==='next'){
@@ -2317,14 +2324,33 @@ function renderTimetable(){
    HISTORY
 ════════════════════════════════ */
 function renderHistory(){
-  const{sessions}=S.data;
+  const{sessions,subjects}=S.data;
+  const real=sessions.filter(s=>s.subject!=='grace');
+
+  // Filter chips data
+  const subjNames=[...new Set(real.map(s=>{const sub=subjects.find(x=>x.id===s.subject);return sub?sub.name:null;}).filter(Boolean))].sort();
+  const subjMap={};subjects.forEach(s=>{subjMap[s.name]=s.id;});
+
+  // Apply filters
+  const filtered=real.filter(s=>{
+    if(S.histSubFilter!=='All'){const sid=subjMap[S.histSubFilter];if(sid&&s.subject!==sid)return false;if(!sid)return false;}
+    if(S.histConfFilter!=='All'&&s.confidence!==parseInt(S.histConfFilter))return false;
+    return true;
+  });
+
+  // Heatmap uses filtered data
   const cells=[];
-  for(let i=111;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=localDate(d);cells.push({date:ds,mins:dayMins(sessions,ds),isT:ds===today()});}
+  for(let i=111;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=localDate(d);
+    const dayS=filtered.filter(s=>s.date===ds);const mins=dayS.reduce((a,s)=>a+s.duration,0);
+    cells.push({date:ds,mins,isT:ds===today()});
+  }
   const byDate={};
-  sessions.filter(s=>s.subject!=='grace').forEach(s=>{if(!byDate[s.date])byDate[s.date]=[];byDate[s.date].push(s);});
+  filtered.forEach(s=>{if(!byDate[s.date])byDate[s.date]=[];byDate[s.date].push(s);});
   const sorted=Object.keys(byDate).sort((a,b)=>b.localeCompare(a));
-  const totalHrs=Math.round(totalMins(sessions)/60*10)/10;
-  const activeDays=new Set(sessions.filter(s=>s.subject!=='grace').map(s=>s.date)).size;
+  const totalHrs=Math.round(filtered.reduce((a,s)=>a+s.duration,0)/60*10)/10;
+  const activeDays=new Set(real.map(s=>s.date)).size;
+  const isFiltered=S.histSubFilter!=='All'||S.histConfFilter!=='All';
+  const CONF_LABELS=['😰','🤔','😐','👍','💪'];
   return`
   <div class="pg-title">History</div>
   <div class="stat3 mb16">
@@ -2332,8 +2358,24 @@ function renderHistory(){
     <div class="stile"><div class="stile-l">Best</div><div class="stile-v">${getBest(sessions)}</div><div class="stile-s">days</div></div>
     <div class="stile"><div class="stile-l">Active</div><div class="stile-v">${activeDays}</div><div class="stile-s">days</div></div>
   </div>
+  <div class="papers-filter-section mb12">
+    <div class="pf-group">
+      <div class="pf-label">Subject</div>
+      <div class="pf-chips pf-chips-scroll">
+        ${chipFilter('All','All','hist-filter-sub',S.histSubFilter,null)}
+        ${subjNames.map(n=>chipFilter(n,n,'hist-filter-sub',S.histSubFilter,real.filter(s=>s.subject===subjMap[n]).length)).join('')}
+      </div>
+    </div>
+    <div class="pf-group">
+      <div class="pf-label">Confidence</div>
+      <div class="pf-chips">
+        ${chipFilter('All','All','hist-filter-conf',S.histConfFilter,null)}
+        ${[1,2,3,4,5].map(c=>chipFilter(CONF_LABELS[c-1]+' '+c,''+c,'hist-filter-conf',S.histConfFilter,real.filter(s=>s.confidence===c).length)).join('')}
+      </div>
+    </div>
+  </div>
   <div class="card mb16" style="padding:16px 18px;">
-    <div class="sec mb8"><span class="sec-lbl">Activity · 16 weeks</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);">${totalHrs}h total</span></div>
+    <div class="sec mb8"><span class="sec-lbl">Activity · 16 weeks${isFiltered?' (filtered)':''}</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);">${totalHrs}h${isFiltered?' filtered':' total'}</span></div>
     <div class="hmap">
       <div class="hmap-labels">
         <div class="hmap-inner">
@@ -2344,8 +2386,8 @@ function renderHistory(){
       <div class="hleg"><span>Less</span>${['h0','h1','h2','h3','h4'].map(c=>`<div class="hlc ${c}"></div>`).join('')}<span>More</span></div>
     </div>
   </div>
-  <div class="sec mb12"><span class="sec-lbl">All sessions</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);">${sessions.filter(s=>s.subject!=='grace').length} total</span></div>
-  ${sorted.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">No sessions yet</div><div class="empty-s">Your study history will appear here once you start logging.</div></div>`:
+  <div class="sec mb12"><span class="sec-lbl">${isFiltered?'Filtered sessions':'All sessions'}</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);">${filtered.length} total</span></div>
+  ${sorted.length===0?`<div class="empty"><div class="empty-e">◎</div><div class="empty-t">${isFiltered?'No matching sessions':'No sessions yet'}</div><div class="empty-s">${isFiltered?'Try adjusting your filters.':'Your study history will appear here once you start logging.'}</div></div>`:
   sorted.map(date=>{
     const ds=byDate[date].sort((a,b)=>b.ts-a.ts);
     return`<div class="hist-group">
@@ -2358,8 +2400,19 @@ function renderHistory(){
 /* ════════════════════════════════
    STATS
 ════════════════════════════════ */
+function filterByRange(sessions,range){
+  if(range==='all')return sessions;
+  const days={7:'7',30:'30',90:'90'}[range]||0;
+  if(!days)return sessions;
+  const cutoff=new Date();cutoff.setDate(cutoff.getDate()-parseInt(days));
+  const cutStr=localDate(cutoff);
+  return sessions.filter(s=>s.date>=cutStr);
+}
+
 function renderStats(){
-  const{sessions,subjects,year}=S.data;
+  const{sessions:allSessions,subjects,year}=S.data;
+  const sessions=filterByRange(allSessions,S.statsRange);
+  const rangeLabel={7:'7 days',30:'30 days',90:'90 days',all:'All time'}[S.statsRange]||'All time';
   const wMins=weekMins(sessions);
   const tm=totalMins(sessions),th=Math.round(tm/60*10)/10;
   const ts=sessions.filter(s=>s.subject!=='grace').length;
@@ -2368,7 +2421,7 @@ function renderStats(){
   const avgHpd=dA>0?tm/60/dA:0;
   const dLeft=Math.max(0,daysUntil(getExamDate(year).date));
   const proj=Math.round((th+avgHpd*dLeft)*10)/10;
-  const ss=subjects.map(sub=>({...sub,mins:subMinsAll(sessions,sub.id),ct:sessions.filter(s=>s.subject===sub.id).length})).sort((a,b)=>b.mins-a.mins);
+  const ss=subjects.map(sub=>{const f=sessions.filter(s=>s.subject===sub.id);return{...sub,mins:f.reduce((a,s)=>a+s.duration,0),ct:f.length};}).sort((a,b)=>b.mins-a.mins);
   const maxM=ss[0]?.mins||1;
   const last7=getLast7(),maxD=Math.max(...last7.map(d=>dayMins(sessions,d.date)),1);
   // Consistency: % of last 14 days with a session
@@ -2379,23 +2432,28 @@ function renderStats(){
 
   return`
   <div class="pg-title">Stats</div>
+  <div class="stats-range-row">
+    ${['7','30','90','all'].map(r=>
+      `<div class="stats-range-chip${S.statsRange===r?' on':''}" data-action="sel-statsRange" data-val="${r}">${r==='all'?'All':r+'d'}</div>`
+    ).join('')}
+  </div>
   <div class="stat-hero">
     <div><div class="sbv">${th}h</div><div class="sbl">Total hours</div></div>
     <div><div class="sbv">${ts}</div><div class="sbl">Sessions</div></div>
     <div><div class="sbv">${consistPct}%</div><div class="sbl">Consistency</div></div>
     <div><div class="sbv">${avg}m</div><div class="sbl">Avg session</div></div>
   </div>
-  <div class="proj-card mb16">
+  ${S.statsRange==='all'?`<div class="proj-card mb16">
     <div class="proj-lbl">Exam projection</div>
     <div class="proj-v">~${proj} hours by ${getExamDate(year).name}</div>
     <div class="proj-s">At ${Math.round(avgHpd*10)/10}h/day avg · ${dA} active days · ${dLeft} days left</div>
-  </div>
+  </div>`:''}
   <div class="card mb16" style="padding:16px 18px;">
     <div class="sec"><span class="sec-lbl">This week</span><span style="font-family:'DM Mono',monospace;font-size:10px;color:var(--tx3);">${fmtDur(wMins)} total</span></div>
     <div class="wk-chart">${last7.map(d=>{const m=dayMins(sessions,d.date);const isT=d.date===today();const pct=Math.max(m>0?6:0,Math.round((m/maxD)*100));return`<div class="wkbw"><div class="wkb${isT?' tod':''}" style="height:${pct}%" title="${fmtDur(m)}"></div><div class="wkd${isT?' tod':''}">${d.label}</div></div>`;}).join('')}</div>
   </div>
   <div class="card" style="padding:16px 18px;">
-    <div class="sec"><span class="sec-lbl">By subject</span><span style="font-size:12px;color:var(--tx3);">All time</span></div>
+    <div class="sec"><span class="sec-lbl">By subject</span><span style="font-size:12px;color:var(--tx3);">${rangeLabel}</span></div>
     <div class="sub-stat-bars">${ss.map(sub=>{const pct=Math.round((sub.mins/maxM)*100);const h=Math.round(sub.mins/60*10)/10;const c=getSubjColor(sub);return`<div class="ssb-row">
         <div class="ssb-av" style="background:${c.bg};border-color:${c.bd};color:${c.tx};">${sub.abbr}</div>
         <div class="ssb-info">
@@ -3035,6 +3093,10 @@ async function loadPapersData(force=false){
   return result;
 }
 
+function chipFilter(label, val, action, currentVal, count){
+  return`<div class="filter-chip${currentVal===val?' on':''}" data-action="${action}" data-val="${val}">${label}${count!=null?' <span class="fc-count">'+count+'</span>':''}</div>`;
+}
+
 function renderPapers(){
   const data = S.papersData;
 
@@ -3096,10 +3158,6 @@ function renderPapers(){
   // Count papers per year level
   const yr11Count = all.filter(p=>p.unit&&p.unit.includes('11')).length;
   const yr12Count = all.filter(p=>p.unit&&p.unit.includes('12')).length;
-
-  function chipFilter(label, val, action, currentVal, count){
-    return`<div class="filter-chip${currentVal===val?' on':''}" data-action="${action}" data-val="${val}">${label}${count!=null?' <span class="fc-count">'+count+'</span>':''}</div>`;
-  }
 
   const cards = filtered.map(p=>{
     const c = p.color!==undefined ? getSubjColor({color:p.color}) : {bg:'var(--srf2)',tx:'var(--tx3)',bd:'var(--bd)'};
@@ -3247,6 +3305,90 @@ function renderPdfViewer(){
 }
 
 /* ════════════════════════════════
+   TIMER FOCUS MODE
+════════════════════════════════ */
+function renderTimerFocus(){
+  const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;
+  const pct=Math.min(100,(timerElap/timerTarget)*100);
+  const timerFontMap={default:"'Cormorant',serif",mono:"'DM Mono',monospace",space:"'Space Mono',monospace",playfair:"'Playfair Display',serif",outfit:"'Outfit',sans-serif",jetbrains:"'JetBrains Mono',monospace"};
+  const tFont=timerFontMap[S.timerFont]||timerFontMap.default;
+  const R=88,CIRC=2*Math.PI*R;
+  const offset=CIRC-(pct/100)*CIRC;
+  const themed=S.timerBg&&S.timerBg!=='none';
+  const focusLabels=['Ready','Focus time','In the zone','Deep focus','Unstoppable'];
+  const focusIdx=timerRunning?Math.min(4,Math.floor(timerElap/600)):0;
+  const statusLabel=timerRunning?focusLabels[focusIdx]:timerElap>0?'Paused':'Ready';
+  const dotAngle=((pct/100)*360-90)*Math.PI/180;
+  const dotX=110+R*Math.cos(dotAngle),dotY=110+R*Math.sin(dotAngle);
+
+  // Colors — always use themed style in focus mode (white on dark bg or themed bg)
+  const useThemed=themed;
+  const trackCol=useThemed?'rgba(255,255,255,.12)':'var(--srf2)';
+  const tickOff=useThemed?'rgba(255,255,255,.08)':'var(--bd)';
+  const tickOn=useThemed?(timerRunning?'rgba(255,255,255,.7)':'rgba(255,255,255,.35)'):(timerRunning?'var(--acc)':'var(--bdS)');
+  const tickMajorOff=useThemed?'rgba(255,255,255,.15)':'.4';
+  const thTicks=Array.from({length:60},(_,i)=>{
+    const angle=(i/60)*360-90,rad=angle*Math.PI/180,isMajor=i%5===0;
+    const outerR=97,innerR=isMajor?91:93;
+    const x1=110+outerR*Math.cos(rad),y1=110+outerR*Math.sin(rad);
+    const x2=110+innerR*Math.cos(rad),y2=110+innerR*Math.sin(rad);
+    const filled=pct>0&&(i/60)*100<=pct;
+    return`<line x1="${x1.toFixed(1)}" y1="${y1.toFixed(1)}" x2="${x2.toFixed(1)}" y2="${y2.toFixed(1)}" stroke="${filled?tickOn:tickOff}" stroke-width="${isMajor?'1.5':'0.8'}" stroke-linecap="round" opacity="${filled?'1':isMajor?tickMajorOff:'.2'}"/>`;
+  }).join('');
+
+  // Pomodoro dots
+  const pomoDots=Array.from({length:4},(_,i)=>`<div class="pomo-dot${i<(S.pomodoroCount||0)%4?' done':''}"></div>`).join('');
+  const pomoCount=S.pomodoroCount||0;
+
+  // Duration presets for when not running
+  const presets=[15,20,25,30,45,60,90];
+
+  return`<div class="tf-wrap${useThemed?' tf-themed':''}">
+    ${useThemed?`<div class="tf-bg">${renderTimerBg(S.timerBg)}</div>`:''}
+    <div class="tf-exit" data-action="timer-exit-focus" title="Exit fullscreen (Esc / F)">✕</div>
+    <div class="tf-body">
+      <div class="tf-ring-wrap">
+        <svg class="timer-ring-svg" width="280" height="280" viewBox="0 0 220 220">
+          <defs>
+            <linearGradient id="ring-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+              <stop offset="0%" stop-color="${useThemed?'rgba(255,255,255,.9)':'var(--acc)'}"/>
+              <stop offset="100%" stop-color="${useThemed?(pct>50?'rgba(180,230,180,.9)':'rgba(255,200,150,.9)'):(pct>50?'var(--ok)':'var(--accD)')}"/>
+            </linearGradient>
+            <filter id="ring-glow">
+              <feGaussianBlur stdDeviation="3" result="blur"/>
+              <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+            </filter>
+          </defs>
+          ${thTicks}
+          <circle cx="110" cy="110" r="${R}" fill="none" stroke="${trackCol}" stroke-width="4.5" opacity=".5"/>
+          <circle cx="110" cy="110" r="${R}" fill="none" stroke="${timerRunning?'url(#ring-grad)':(useThemed?'rgba(255,255,255,.25)':'var(--bdS)')}" stroke-width="5" stroke-linecap="round" stroke-dasharray="${CIRC}" stroke-dashoffset="${offset}" id="tt-ring" style="transition:stroke-dashoffset .5s linear,stroke .3s;transform:rotate(-90deg);transform-origin:center;"${timerRunning?' filter="url(#ring-glow)"':''}/>
+          ${(timerRunning||timerElap>0)&&pct>0?`<circle cx="${dotX.toFixed(1)}" cy="${dotY.toFixed(1)}" r="${timerRunning?'5':'3.5'}" fill="${timerRunning?(useThemed?'#fff':'var(--acc)'):(useThemed?'rgba(255,255,255,.4)':'var(--bdS)')}" id="tt-dot" class="${timerRunning?'tt-dot-pulse':''}" style="transition:cx .5s linear,cy .5s linear,r .2s ease;"/>
+          ${timerRunning?`<circle cx="${dotX.toFixed(1)}" cy="${dotY.toFixed(1)}" r="10" fill="${useThemed?'rgba(255,255,255,.12)':'var(--acc)'}" opacity=".15" id="tt-dot-glow" style="transition:cx .5s linear,cy .5s linear;"/>`:''}`:''
+          }
+        </svg>
+        <div class="timer-ring-center">
+          <div class="timer-num tf-num${timerRunning?' run':''}" id="tt-time" style="font-family:${tFont};">${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}</div>
+          <div class="timer-status tf-status" id="tt-lbl">${statusLabel}</div>
+          ${timerElap>0?`<div class="timer-pct tf-pct" id="tt-pct">${Math.round(pct)}%</div>`:''}
+        </div>
+      </div>
+      <div class="tf-controls">
+        ${timerRunning
+          ?`<button class="tf-btn tf-btn-pause" data-action="timer-pause"><span class="timer-btn-icon">❚❚</span>Pause</button>`
+          :`<button class="tf-btn tf-btn-start" data-action="timer-start"><span class="timer-btn-icon">▶</span>${timerElap>0?'Resume':'Start'}</button>`}
+        <button class="tf-btn tf-btn-reset" data-action="timer-reset"><span class="timer-btn-icon">↺</span>Reset</button>
+      </div>
+      ${timerElap>0&&!timerRunning?`<button class="tf-log-cta" data-action="open-log">Log ${fmtDur(Math.ceil(timerElap/60))} session →</button>`:''}
+      ${!timerRunning&&timerElap===0?`<div class="tf-presets">${presets.map(t=>{
+        const active=timerTarget===t*60;
+        return`<div class="tf-preset${active?' on':''}" data-action="set-timer" data-dur="${t}">${t}m</div>`;
+      }).join('')}</div>`:''}
+      ${pomoCount>0?`<div class="tf-pomo"><div class="pomo-dots">${pomoDots}</div><span class="tf-pomo-count">${pomoCount} pomodoro${pomoCount!==1?'s':''}</span></div>`:''}
+    </div>
+  </div>`;
+}
+
+/* ════════════════════════════════
    TIMER VIEW
 ════════════════════════════════ */
 function renderTimer(){
@@ -3280,6 +3422,8 @@ function renderTimer(){
 
   const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;
   const pct=Math.min(100,(timerElap/timerTarget)*100);
+  const timerFontMap={default:"'Cormorant',serif",mono:"'DM Mono',monospace",space:"'Space Mono',monospace",playfair:"'Playfair Display',serif",outfit:"'Outfit',sans-serif",jetbrains:"'JetBrains Mono',monospace"};
+  const tFont=timerFontMap[S.timerFont]||timerFontMap.default;
   const R=88,CIRC=2*Math.PI*R;
   const offset=CIRC-(pct/100)*CIRC;
   const presets=[15,20,25,30,45,60,90];
@@ -3315,7 +3459,7 @@ function renderTimer(){
   }).join('');
 
   return`
-  <div class="pg-title">Timer</div>
+  <div class="pg-title">Timer<button class="tf-toggle" data-action="timer-enter-focus" title="Fullscreen timer (F)">⛶ Fullscreen</button></div>
   <div class="card timer-card${timerRunning?' timer-active':''}${timerElap>0&&!timerRunning?' timer-paused':''}${themed?' timer-themed':''}">
     <div class="timer-bg">${themed?renderTimerBg(S.timerBg):''}</div>
     <div class="timer-face">
@@ -3339,7 +3483,7 @@ function renderTimer(){
           }
         </svg>
         <div class="timer-ring-center">
-          <div class="timer-num${timerRunning?' run':''}" id="tt-time">${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}</div>
+          <div class="timer-num${timerRunning?' run':''}" id="tt-time" style="font-family:${tFont};">${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}</div>
           <div class="timer-status" id="tt-lbl">${statusLabel}</div>
           ${timerElap>0?`<div class="timer-pct" id="tt-pct">${Math.round(pct)}%</div>`:''}
         </div>
@@ -3416,6 +3560,23 @@ function renderTimer(){
         <div class="amb-preview amb-prev-ocean"></div>
         <div class="amb-label">Ocean</div>
       </div>
+    </div>
+  </div>
+
+  <div class="card timer-font-card">
+    <div class="sec mb8"><span class="sec-lbl">Clock font</span></div>
+    <div class="timer-font-grid">
+      ${[
+        {id:'default',label:'Default',family:"'Cormorant',serif",sample:'08:25'},
+        {id:'mono',label:'Mono',family:"'DM Mono',monospace",sample:'08:25'},
+        {id:'space',label:'Space',family:"'Space Mono',monospace",sample:'08:25'},
+        {id:'playfair',label:'Playfair',family:"'Playfair Display',serif",sample:'08:25'},
+        {id:'outfit',label:'Outfit',family:"'Outfit',sans-serif",sample:'08:25'},
+        {id:'jetbrains',label:'JetBrains',family:"'JetBrains Mono',monospace",sample:'08:25'},
+      ].map(f=>`<div class="timer-font-opt${S.timerFont===f.id?' on':''}" data-action="set-timer-font" data-font="${f.id}">
+        <div class="timer-font-sample" style="font-family:${f.family};">${f.sample}</div>
+        <div class="timer-font-label">${f.label}</div>
+      </div>`).join('')}
     </div>
   </div>
 
@@ -3584,8 +3745,9 @@ function renderLeaderboard(){
       ${podiumOrder.map((r,i)=>{
         if(!r)return`<div class="lb-podium-slot lb-podium-empty"></div>`;
         const isMe=r.userId===myId;
-        return`<div class="lb-podium-slot${isMe?' lb-podium-me':''}"${!isMe?` data-action="lb-pick-rival" data-uid="${r.userId}"`:''}">
-          <div class="lb-podium-avatar${isMe?' lb-podium-avatar-me':''}" style="${i===1?'width:56px;height:56px;font-size:22px;':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
+        return`<div class="lb-podium-slot lb-podium-${places[i]}${isMe?' lb-podium-me':''}"${!isMe?` data-action="lb-pick-rival" data-uid="${r.userId}"`:''}">
+          ${i===1?'<div class="lb-podium-crown">👑</div>':''}
+          <div class="lb-podium-avatar${isMe?' lb-podium-avatar-me':''}${i===1?' lb-podium-avatar-first':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-podium-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
           <div class="lb-podium-val">${fmtLbValShort(r,sortKey)}</div>
           <div class="lb-podium-bar" style="height:${heights[i]}px;background:${podiumBgs[i]};">
@@ -3632,19 +3794,26 @@ function renderLeaderboard(){
 
   // ── Rankings tab ──
   function renderRankings(){
-    if(S.lbLoading)return`<div class="lb-loading"><div class="lb-spinner"></div><div style="margin-top:12px;">Loading leaderboard…</div></div>`;
+    if(S.lbLoading)return`<div class="lb-loading"><div class="lb-spinner"></div><div class="lb-loading-text">Loading leaderboard…</div></div>`;
     if(!rows.length)return`<div class="lb-empty">
-      <div style="font-size:40px;margin-bottom:12px;">🏆</div>
-      <div style="font-size:15px;font-weight:500;color:var(--tx);margin-bottom:6px;">No one on the board yet</div>
-      <div style="font-size:13px;line-height:1.5;">Log a study session and you'll be the first!</div>
+      <div class="lb-empty-icon">🏆</div>
+      <div class="lb-empty-title">No one on the board yet</div>
+      <div class="lb-empty-desc">Log a study session and you'll be the first!</div>
     </div>`;
 
     const myRank=sorted.findIndex(r=>r.userId===myId);
     const rest=sorted.slice(3);
 
+    // Activity indicator — who's been active recently
+    const activeCount=rows.filter(r=>(r.weekMins||0)>0).length;
+
     return`
     <div class="lb-sort-bar">
       ${Object.keys(sortLabel).map(k=>`<div class="lb-sort-chip${sortKey===k?' on':''}" data-action="lb-sort" data-key="${k}"><span class="lb-sort-ic">${sortIcons[k]}</span>${sortLabel[k]}</div>`).join('')}
+    </div>
+    <div class="lb-activity-bar">
+      <span class="lb-activity-dot"></span>
+      <span class="lb-activity-text">${activeCount} active this week · ${sorted.length} total</span>
     </div>
     ${renderPodium()}
     ${renderMyStats()}
@@ -3655,11 +3824,12 @@ function renderLeaderboard(){
         const myName=(S.data?.name||'').trim().toLowerCase();
         const isDupe=!isMe&&myName&&(r.name||'').trim().toLowerCase()===myName;
         const rank=i+4;
-        return`<div class="lb-row${isMe?' lb-me':''}"${isMe?'':` data-action="lb-pick-rival" data-uid="${r.userId}"`}>
+        const isActive=(r.weekMins||0)>0;
+        return`<div class="lb-row${isMe?' lb-me':''}${!isActive?' lb-inactive':''}"${isMe?'':` data-action="lb-pick-rival" data-uid="${r.userId}"`}>
           <div class="lb-rank"><span class="lb-rank-num">${rank}</span></div>
-          <div class="lb-avatar" style="background:${isMe?'var(--acc)':'var(--srf3)'};color:${isMe?'#fff':'var(--tx2)'};">${esc((r.name||'?')[0].toUpperCase())}</div>
+          <div class="lb-avatar${isMe?' lb-avatar-me':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-info">
-            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you" style="color:var(--err);background:rgba(184,50,40,.08);">dupe</span>':''}</div>
+            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you lb-dupe">dupe</span>':''}</div>
             <div class="lb-sub">${secondaryInfo(r,sortKey)}</div>
           </div>
           <div class="lb-stat">
@@ -4007,6 +4177,11 @@ function renderLeaderboard(){
   </div>
   <div class="lb-content">
     ${S.lbTab===0?renderRankings():S.lbTab===1?renderH2H():renderTeamsTab()}
+  </div>
+  <div class="lb-invite-card">
+    <div class="lb-invite-text">Invite friends to compete</div>
+    <div class="lb-invite-sub">Share Meridian and study together</div>
+    <button class="lb-invite-btn" data-action="lb-share">Share link ↗</button>
   </div>
   <div class="lb-footer">
     <button class="cpbtn" data-action="lb-refresh" style="width:100%;">↻ Refresh leaderboard</button>
@@ -4513,6 +4688,11 @@ const A={
   'lb-pick-rival':(btn)=>{S.lbRival=btn.dataset.uid;S.lbTab=1;render();},
   'lb-clear-rival':()=>{S.lbRival=null;render();},
   'lb-h2h-mode':(btn)=>{S.lbH2hMode=btn.dataset.key;render();},
+  'lb-share':()=>{
+    const url=window.location.href;
+    if(navigator.share){navigator.share({title:'Meridian — Study Tracker',text:'Join me on Meridian and let\'s compete!',url}).catch(()=>{});}
+    else{navigator.clipboard.writeText(url).then(()=>showToast('Link copied','📋')).catch(()=>showToast('Could not copy','!'));}
+  },
   'lb-refresh':()=>{
     S.lbLoading=true;render();
     lbPush().then(()=>lbGetCached(true)).then(async d=>{
@@ -4770,6 +4950,9 @@ const A={
     // Render thumbs after paint
     setTimeout(renderPaperThumbs, 200);
   },
+  'hist-filter-sub':(btn)=>{S.histSubFilter=btn.dataset.val;render();},
+  'hist-filter-conf':(btn)=>{S.histConfFilter=btn.dataset.val;render();},
+  'sel-statsRange':(btn)=>{S.statsRange=btn.dataset.val;render();},
   'papers-filter-sub':(btn)=>{S.papersSubFilter=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
   'papers-filter-yr':(btn)=>{S.papersYrFilter=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
   'papers-filter-src':(btn)=>{S.papersSrcFilter=btn.dataset.val;render();setTimeout(renderPaperThumbs,200);},
@@ -4980,6 +5163,17 @@ const A={
   'timer-start':()=>{startTimer();if(S.timerBg!=='none'&&S.timerAudio)Ambient.play(S.timerBg);render();},
   'timer-pause':()=>{pauseTimer();Ambient.stop();render();},
   'timer-reset':()=>{resetTimer();Ambient.stop();render();},
+  'set-timer-font':(btn)=>{
+    S.timerFont=btn.dataset.font||'default';
+    localStorage.setItem('mer_timer_font',S.timerFont);
+    render();
+  },
+  'timer-enter-focus':()=>{
+    S.timerFocus=true;render();
+  },
+  'timer-exit-focus':()=>{
+    S.timerFocus=false;render();
+  },
   'set-timer-bg':(btn)=>{
     S.timerBg=btn.dataset.bg||'none';
     localStorage.setItem('mer_timer_bg',S.timerBg);
@@ -5301,7 +5495,9 @@ function attach(){
     if(e.key==='d'&&!S.modal&&S.data&&noInput){navTo('dashboard');return;}
     if(e.key==='p'&&!S.modal&&S.data&&noInput){navTo('progress');return;}
     if(e.key==='h'&&!S.modal&&S.data&&noInput){navTo('history');return;}
+    if(e.key==='f'&&S.view==='timer'&&!S.modal&&S.data&&noInput){S.timerFocus=!S.timerFocus;render();return;}
     if(e.key==='Escape'){
+      if(S.timerFocus){S.timerFocus=false;render();return;}
       if(pdfViewerState){A['close-pdf']();return;}
       if(S.modal){closeModalSmooth();return;}
       if(S.moreMenu){closeMoreSmooth();return;}
