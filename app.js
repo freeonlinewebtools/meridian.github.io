@@ -3909,8 +3909,8 @@ function renderAssess(){
 
   const overallRecs=upcoming.map(a=>({a,r:studyRec(a)})).filter(x=>x.r?.urgent).sort((a,b)=>a.r.daysLeft-b.r.daysLeft);
 
-  return`<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;">
-    <div class="pg-title" style="margin-bottom:0;">Assessments</div>
+  return`<div class="pg-header-row">
+    <div class="pg-title">Assessments</div>
     <button class="icon-add-btn" data-action="open-add-assess">＋ Add</button>
   </div>
   ${overallRecs.length?`<div class="assess-banner">
@@ -4022,7 +4022,9 @@ function renderTodo(){
     </div>`;
   }
 
-  return`<div class="pg-title">To-Do</div>
+  return`<div class="pg-header-row">
+    <div class="pg-title">To-Do</div>
+  </div>
   <div class="todo-qadd">
     <input type="text" id="todo-new-input" class="todo-qinput" placeholder="New task… press Enter to save" maxlength="120">
     <button class="todo-qadd-btn" data-action="todo-quick-add" aria-label="Add task">
@@ -4237,7 +4239,7 @@ function renderLeaderboard(){
           <div class="lb-podium-avatar${isMe?' lb-podium-avatar-me':''}${i===1?' lb-podium-avatar-first':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-podium-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
           <div class="lb-podium-val">${fmtLbValShort(r,sortKey)}</div>
-          ${(()=>{const lastWeekRows2=rows.filter(x=>(x.lastWeekMins||0)>0);const lww=lastWeekRows2.length?lastWeekRows2.reduce((b,x)=>(x.lastWeekMins||0)>(b.lastWeekMins||0)?x:b,lastWeekRows2[0]):null;return lww&&r.userId===lww.userId?'<div class="lb-podium-lwbadge">🏆 last wk</div>':'';})()}
+          ${(()=>{const lastWeekRows2=rows.filter(x=>(x.lastWeekMins||0)>0);const lww=lastWeekRows2.length?lastWeekRows2.reduce((b,x)=>(x.lastWeekMins||0)>(b.lastWeekMins||0)?x:b,lastWeekRows2[0]):null;return lww&&r.userId===lww.userId?'<div class="lb-podium-lwbadge">◆ last wk</div>':'';})()}
           <div class="lb-podium-bar" style="height:${heights[i]}px;background:${podiumBgs[i]};">
             <span class="lb-podium-medal">${medalEmojis[i]}</span>
             <span class="lb-podium-place">${places[i]}</span>
@@ -4298,12 +4300,17 @@ function renderLeaderboard(){
     // Last week's champion — whoever has the highest lastWeekMins
     const lastWeekRows=rows.filter(r=>(r.lastWeekMins||0)>0);
     const lastWeekWinner=lastWeekRows.length?lastWeekRows.reduce((best,r)=>(r.lastWeekMins||0)>(best.lastWeekMins||0)?r:best,lastWeekRows[0]):null;
-    const lwBanner=lastWeekWinner?`<div class="lb-lastweek-banner">
-      <span class="lb-lastweek-crown">🏆</span>
-      <div class="lb-lastweek-body">
-        <div class="lb-lastweek-title">Last week's champion</div>
-        <div class="lb-lastweek-name">${esc(lastWeekWinner.name)}${lastWeekWinner.userId===myId?' <span class="lb-you">you</span>':''} · ${fmtDur(lastWeekWinner.lastWeekMins)}</div>
+    const lwBanner=lastWeekWinner?`<div class="lb-lw-card">
+      <div class="lb-lw-left">
+        <div class="lb-lw-hrs">${fmtDur(lastWeekWinner.lastWeekMins)}</div>
+        <div class="lb-lw-sublabel">last week</div>
       </div>
+      <div class="lb-lw-divider"></div>
+      <div class="lb-lw-right">
+        <div class="lb-lw-eyebrow">Last week's champion</div>
+        <div class="lb-lw-name">${esc(lastWeekWinner.name)}${lastWeekWinner.userId===myId?' <span class="lb-you">you</span>':''}</div>
+      </div>
+      <div class="lb-lw-crown">◆</div>
     </div>`:'';
 
     return`
@@ -4330,7 +4337,7 @@ function renderLeaderboard(){
           <div class="lb-rank"><span class="lb-rank-num">${rank}</span></div>
           <div class="lb-avatar${isMe?' lb-avatar-me':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-info">
-            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you lb-dupe">dupe</span>':''}${isLwWinner?' <span class="lb-lw-badge">🏆 last wk</span>':''}</div>
+            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you lb-dupe">dupe</span>':''}${isLwWinner?' <span class="lb-lw-badge">◆ last wk</span>':''}</div>
             <div class="lb-sub">${secondaryInfo(r,sortKey)}</div>
           </div>
           <div class="lb-stat">

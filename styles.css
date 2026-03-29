@@ -5697,12 +5697,202 @@ button:disabled,button[disabled],.abtn.disabled{
 @media(hover:none){.ti-actions{opacity:1;}}
 
 /* ══════════════════════════════════════
-   LEADERBOARD — LAST WEEK BADGE
+   LEADERBOARD — LAST WEEK CHAMPION
 ══════════════════════════════════════ */
-.lb-lastweek-banner{display:flex;align-items:center;gap:12px;background:linear-gradient(110deg,rgba(255,200,0,.1),rgba(255,200,0,.03));border:1px solid rgba(255,200,0,.3);border-radius:var(--rm);padding:11px 16px;margin-bottom:12px;}
-.lb-lastweek-crown{font-size:20px;}
-.lb-lastweek-title{font-size:10px;font-weight:600;letter-spacing:.08em;text-transform:uppercase;color:rgba(255,200,0,.7);margin-bottom:1px;}
-.lb-lastweek-name{font-size:13px;font-weight:500;color:var(--tx);}
-.lb-lw-badge{font-size:9px;font-weight:600;background:rgba(255,200,0,.15);color:#c8a000;border-radius:4px;padding:1px 5px;vertical-align:middle;}
-.lb-podium-lwbadge{font-size:9px;font-weight:600;background:rgba(255,200,0,.15);color:#c8a000;border-radius:4px;padding:1px 5px;margin-top:3px;text-align:center;}
+.lb-lw-card{
+  display:flex;align-items:center;gap:0;
+  background:var(--srf);border:1px solid var(--bd);
+  border-radius:var(--rm);margin-bottom:14px;
+  box-shadow:var(--sh);overflow:hidden;
+  position:relative;
+}
+.lb-lw-card::before{
+  content:'';position:absolute;inset:0;
+  background:linear-gradient(110deg,rgba(192,90,48,.07) 0%,transparent 60%);
+  pointer-events:none;
+}
+.lb-lw-left{
+  padding:16px 20px;text-align:center;flex-shrink:0;
+}
+.lb-lw-hrs{
+  font-family:'Cormorant',serif;font-size:34px;font-weight:400;
+  color:var(--acc);line-height:1;letter-spacing:-.02em;
+}
+.lb-lw-sublabel{
+  font-family:'DM Mono',monospace;font-size:8.5px;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--tx3);margin-top:3px;
+}
+.lb-lw-divider{width:1px;background:var(--bd);align-self:stretch;flex-shrink:0;}
+.lb-lw-right{padding:16px 18px;flex:1;min-width:0;}
+.lb-lw-eyebrow{
+  font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.12em;
+  text-transform:uppercase;color:var(--acc);opacity:.7;margin-bottom:5px;
+}
+.lb-lw-name{
+  font-size:15px;font-weight:500;color:var(--tx);letter-spacing:-.01em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
+}
+.lb-lw-crown{
+  font-size:13px;color:var(--acc);opacity:.25;padding-right:18px;flex-shrink:0;
+  font-family:'DM Mono',monospace;
+}
+.lb-lw-badge{font-family:'DM Mono',monospace;font-size:9px;font-weight:600;background:var(--accL);color:var(--acc);border-radius:4px;padding:1px 5px;vertical-align:middle;letter-spacing:.02em;}
+.lb-podium-lwbadge{font-family:'DM Mono',monospace;font-size:8px;font-weight:600;background:var(--accL);color:var(--acc);border-radius:4px;padding:1px 5px;margin-top:3px;text-align:center;letter-spacing:.02em;}
 
+
+/* ====================================================
+   GLOBAL POLISH — CONSISTENCY & DARK MODE PASS
+==================================================== */
+
+/* -- Page header row — title + add button -- */
+.pg-header-row{
+  display:flex;align-items:flex-start;justify-content:space-between;
+  gap:12px;margin-bottom:20px;position:relative;padding-bottom:14px;
+}
+.pg-header-row::after{
+  content:'';position:absolute;bottom:0;left:0;
+  width:32px;height:2.5px;background:var(--acc);border-radius:2px;
+}
+.pg-header-row .pg-title{margin-bottom:0;padding-bottom:0;}
+.pg-header-row .pg-title::after{display:none;}
+
+/* -- Icon add button — filled accent style -- */
+.icon-add-btn{
+  display:inline-flex;align-items:center;gap:6px;
+  font-family:'DM Mono',monospace;font-size:11px;font-weight:600;
+  letter-spacing:.04em;padding:8px 14px;
+  border-radius:var(--rm);
+  background:var(--acc);color:#fff;
+  border:none;cursor:pointer;
+  transition:var(--tr);white-space:nowrap;flex-shrink:0;
+  box-shadow:0 2px 10px rgba(192,90,48,.3);
+}
+.icon-add-btn:hover{background:var(--accD);transform:translateY(-1px);box-shadow:0 4px 16px rgba(192,90,48,.4);}
+.icon-add-btn:active{transform:translateY(0);box-shadow:0 1px 4px rgba(192,90,48,.2);}
+[data-theme=dark] .icon-add-btn{box-shadow:0 2px 10px rgba(216,115,74,.25);}
+[data-theme=dark] .icon-add-btn:hover{box-shadow:0 4px 16px rgba(216,115,74,.35);}
+
+/* -- Assessment strip — dark mode -- */
+[data-theme=dark] .assess-strip-day.has-assess{background:var(--srf2);border:1px solid var(--bd);}
+[data-theme=dark] .assess-strip-day.is-today{background:var(--acc);}
+[data-theme=dark] .assess-strip-day.is-today .asd-num{color:#fff;}
+[data-theme=dark] .assess-strip-day.is-today .asd-letter{color:rgba(255,255,255,.65);}
+.assess-strip-day.is-today .asd-dot{background:rgba(255,255,255,.6);}
+.assess-strip-day.has-assess:not(.is-today){cursor:pointer;}
+.assess-strip-day.has-assess:not(.is-today):hover{background:var(--srf3);}
+[data-theme=dark] .assess-strip-day.has-assess:not(.is-today):hover{background:var(--srf3);}
+
+/* -- Assessment banner — dark mode -- */
+[data-theme=dark] .assess-banner{
+  background:linear-gradient(110deg,rgba(44,30,22,.9),rgba(30,28,24,.95));
+  border-color:rgba(216,115,74,.25);
+}
+
+/* -- Assessment cards — dark mode -- */
+[data-theme=dark] .ac{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .ac:hover{border-color:var(--bdS);}
+[data-theme=dark] .ac.ac-urgent{background:var(--errL);border-color:rgba(212,74,64,.3);}
+[data-theme=dark] .ac.ac-warn{background:var(--warnL);border-color:rgba(200,148,32,.3);}
+[data-theme=dark] .ac-rec{background:var(--srf2);border-color:var(--bd);}
+[data-theme=dark] .assess-count{background:var(--srf2);border-color:var(--bd);color:var(--tx2);}
+[data-theme=dark] .assess-count-red{background:var(--errL);border-color:rgba(212,74,64,.25);color:var(--err);}
+
+/* -- Todo — dark mode -- */
+[data-theme=dark] .todo-qinput{background:var(--srf);border-color:var(--bd);color:var(--tx);}
+[data-theme=dark] .todo-qinput:focus{border-color:var(--acc);box-shadow:0 0 0 3px rgba(216,115,74,.15),var(--sh);}
+[data-theme=dark] .ti{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .ti:hover{border-color:var(--bdS);}
+[data-theme=dark] .ti.ti-overdue{background:var(--errL);border-color:rgba(212,74,64,.25);}
+[data-theme=dark] .ti.ti-done{opacity:.32;}
+[data-theme=dark] .ti-check{border-color:var(--bd);}
+[data-theme=dark] .ti-check:hover{border-color:var(--acc);}
+[data-theme=dark] .ti-check.ti-checked{background:var(--ok);border-color:var(--ok);}
+[data-theme=dark] .ti.ti-done .ti-text{color:var(--tx3);}
+[data-theme=dark] .ti-due.ti-due-late{color:var(--err);}
+[data-theme=dark] .tg-label{color:var(--tx3);}
+[data-theme=dark] .tg-count{background:var(--srf2);border-color:var(--bd);color:var(--tx2);}
+[data-theme=dark] .tg-count-red{background:var(--errL);border-color:rgba(212,74,64,.25);color:var(--err);}
+[data-theme=dark] .tg-overdue .tg-label{color:var(--err);}
+
+/* -- Leaderboard last week — hover + dark mode -- */
+.lb-lw-card{transition:box-shadow .2s,border-color .2s;}
+.lb-lw-card:hover{box-shadow:var(--shM);border-color:rgba(192,90,48,.2);}
+[data-theme=dark] .lb-lw-card{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .lb-lw-card::before{background:linear-gradient(110deg,rgba(216,115,74,.06) 0%,transparent 60%);}
+[data-theme=dark] .lb-lw-badge{background:var(--accL);color:var(--acc);}
+[data-theme=dark] .lb-podium-lwbadge{background:var(--accL);color:var(--acc);}
+
+/* -- Leaderboard — dark mode polish -- */
+[data-theme=dark] .lb-tabs{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .lb-tab.on{background:var(--srf2);border-color:var(--bd);}
+[data-theme=dark] .lb-sort-chip{background:var(--srf);border-color:var(--bd);color:var(--tx3);}
+[data-theme=dark] .lb-sort-chip.on{background:var(--tx);border-color:var(--tx);color:var(--bg);}
+[data-theme=dark] .lb-row{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .lb-row:hover{background:var(--srf2);border-color:var(--bdS);}
+[data-theme=dark] .lb-me{background:var(--accL);border-color:rgba(216,115,74,.25)!important;}
+
+/* -- Settings rows — dark mode -- */
+[data-theme=dark] .srow{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .srow:hover{background:var(--srf2);border-color:var(--bdS);}
+[data-theme=dark] .settings-stat{background:var(--srf2);border-color:var(--bd);}
+
+/* -- Test / scores — dark mode -- */
+[data-theme=dark] .test-card{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .test-card:hover{background:var(--srf2);}
+[data-theme=dark] .next-test-card{background:linear-gradient(110deg,var(--accL),rgba(30,28,24,.7));border-color:rgba(216,115,74,.25);}
+
+/* -- Papers — dark mode -- */
+[data-theme=dark] .paper-card{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .paper-card:hover{border-color:var(--bdS);}
+[data-theme=dark] .paper-thumb{background:var(--srf2);}
+[data-theme=dark] .papers-upload-prompt{background:var(--srf2);border-color:var(--bdS);}
+
+/* -- Timetable — dark mode -- */
+[data-theme=dark] .tt-tabs{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .tt-tab.on{background:var(--srf2);box-shadow:var(--sh);}
+[data-theme=dark] .tt-item{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .tt-focus{background:var(--srf);}
+
+/* -- Progress tabs — dark mode -- */
+[data-theme=dark] .prog-tabs{background:var(--srf);border-color:var(--bd);}
+[data-theme=dark] .prog-tab.on{background:var(--srf2);box-shadow:var(--sh);}
+[data-theme=dark] .prog-summary{background:var(--srf);}
+
+/* -- Auth UI — dark mode -- */
+[data-theme=dark] .fi{background:var(--srf2);border-color:var(--bd);color:var(--tx);}
+[data-theme=dark] .fi:focus{border-color:var(--acc);background:var(--srf);}
+
+/* -- Empty states — dark mode -- */
+[data-theme=dark] .empty{background:var(--srf);border-color:var(--bd);}
+
+/* -- Timer ambiance/presets — dark mode -- */
+[data-theme=dark] .timer-preset{background:var(--srf2);border-color:var(--bd);}
+[data-theme=dark] .timer-preset:hover{border-color:var(--bdS);}
+[data-theme=dark] .amb-opt{background:var(--srf2);border-color:var(--bd);}
+[data-theme=dark] .amb-opt:hover{border-color:var(--bdS);}
+
+/* -- Touch devices: always show action buttons -- */
+@media(hover:none){
+  .ac-actions{opacity:1;}
+  .ti-actions{opacity:1;}
+  .test-actions{opacity:1;}
+}
+
+/* -- Assess section header spacing -- */
+.assess-section-hd{margin:20px 0 10px;}
+.assess-section-hd:first-child{margin-top:0;}
+
+/* -- General card hover — subtle lift -- */
+.stile:hover,.ov-tile:hover{transform:translateY(-1px);}
+
+/* -- Responsive: tight spacing on very small screens -- */
+@media(max-width:360px){
+  .ac{padding:11px 12px;gap:10px;}
+  .ac-day-num{font-size:26px;}
+  .ti{padding:10px 12px;gap:10px;}
+  .assess-banner{padding:12px 14px;gap:12px;}
+  .assess-banner-num{font-size:32px;}
+  .todo-qinput{padding:10px 13px;}
+  .lb-lw-left{padding:12px 14px;}
+  .lb-lw-hrs{font-size:28px;}
+}
