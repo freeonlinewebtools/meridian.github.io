@@ -255,8 +255,10 @@ function icsEventsToTimetable(evts, subjects){
 function loadLocal(){try{const r=localStorage.getItem(KEY);if(!r)return null;const d=JSON.parse(r);if(!d||typeof d!=='object')return null;if(!d.name)return null;d.sessions=Array.isArray(d.sessions)?d.sessions:[];d.subjects=Array.isArray(d.subjects)?d.subjects:[];d.tests=Array.isArray(d.tests)?d.tests:[];d.timetable=Array.isArray(d.timetable)?d.timetable:[];if(!d.joined)d.joined=today();if(!d.year)d.year=11;return d;}catch{return null;}}
 function saveLocal(d){try{localStorage.setItem(KEY,JSON.stringify(d));}catch(e){console.error('Save failed:',e);showToast('Storage full — data not saved! Export a backup now.','⚠');}}
 function loadSync(){try{const r=localStorage.getItem(SKEY);return r?JSON.parse(r):{apiKey:'',binId:'',lastSynced:null,status:'idle'};}catch{return{apiKey:'',binId:'',lastSynced:null,status:'idle'};}}
+// Patch missing fields for existing accounts loaded from storage
+function migrateData(d){if(!d)return d;if(!d.assessments)d.assessments=[];if(!d.todos)d.todos=[];return d;}
 function saveSync(s){try{localStorage.setItem(SKEY,JSON.stringify(s));}catch(e){console.error('Sync save failed:',e);}}
-function newAccount(name,pin,year,subs){return{name:name.trim(),pin,joined:today(),year,subjects:subs||ALL_PRESET_SUBS.slice(0,7),sessions:[],tests:[],timetable:[],graceUsed:null};}
+function newAccount(name,pin,year,subs){return{name:name.trim(),pin,joined:today(),year,subjects:subs||ALL_PRESET_SUBS.slice(0,7),sessions:[],tests:[],timetable:[],graceUsed:null,assessments:[],todos:[]};}
 function exportCode(d){const s={n:d.name,p:d.pin,j:d.joined,y:d.year,subs:d.subjects,s:d.sessions,tests:d.tests||[],tt:d.timetable||[],g:d.graceUsed};const bytes=new TextEncoder().encode(JSON.stringify(s));let bin='';for(const b of bytes)bin+=String.fromCharCode(b);return btoa(bin);}
 function importCode(code){try{const bin=atob(code.trim());const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);const s=JSON.parse(new TextDecoder().decode(bytes));return{name:s.n,pin:s.p,joined:s.j||today(),year:s.y||11,subjects:s.subs||DEFAULT_SUBS,sessions:s.s||[],tests:s.tests||[],timetable:s.tt||[],graceUsed:s.g||null};}catch{return null;}}
 
@@ -441,94 +443,163 @@ function predictNextScore(data,subId,daysUntilTest){
   if(!sub)return null;
   const subTests=getSubjectTests(tests,subId);
   const subSess=sessions.filter(s=>s.subject===subId&&s.subject!=='grace');
+  const diff=getSubjectDifficulty(sub);
+  const days=Math.max(0,daysUntilTest||30);
+  const todayStr=today();
 
-  // Need at least 1 past test to predict
-  if(!subTests.length)return null;
-
-  // ── Base: weighted average of recent test scores ──
-  const base=getSubjectScorePct(tests,subId)||50;
-
-  // ── Study intensity factor ──
-  // Hours studied in last 2 weeks for this subject
-  const cutoff=addDays(today(),-14);
-  const recentSess=subSess.filter(s=>s.date>=cutoff);
+  // ── Study signals (shared by cold-start and normal path) ──
+  const cutoff14=addDays(todayStr,-14);
+  const cutoff28=addDays(todayStr,-28);
+  const recentSess=subSess.filter(s=>s.date>=cutoff14);
   const recentHrs=recentSess.reduce((a,s)=>a+s.duration,0)/60;
-  // Average hrs/2weeks historically
   const totalHrs=subSess.reduce((a,s)=>a+s.duration,0)/60;
   const weeksActive=Math.max(1,new Set(subSess.map(s=>s.date)).size/5);
   const avgHrs2wk=totalHrs/(weeksActive/2);
-  const studyFactor=avgHrs2wk>0?Math.min(1.08,1+(Math.log(1+recentHrs/Math.max(avgHrs2wk,1))*0.06)):1;
 
-  // ── Confidence trend factor ──
+  // ── Cram detection: >55% of 28d sessions crammed into last 7d ──
+  const last7Sess=subSess.filter(s=>s.date>=addDays(todayStr,-7));
+  const last28Sess=subSess.filter(s=>s.date>=cutoff28);
+  const cramRatio=last28Sess.length>3?last7Sess.length/last28Sess.length:0;
+  const cramPenalty=cramRatio>0.6?-(cramRatio-0.6)*8:0; // up to -3.2 pts
+
+  // ── Session efficiency: confidence per hour (decay-weighted) ──
+  // Ebbinghaus-style: sessions decay with half-life ~21 days
+  let effNumer=0,effDenom=0;
+  subSess.forEach(s=>{
+    const ageDays=Math.max(0,(new Date(todayStr)-new Date(s.date))/(86400000));
+    const decay=Math.exp(-ageDays/21);
+    if(s.confidence>0){effNumer+=s.confidence*decay;effDenom+=decay;}
+  });
+  const decayedAvgConf=effDenom>0?effNumer/effDenom:3;
+
+  // ── Confidence trajectory: linear regression slope on last 6 sessions ──
   const confSess=subSess.filter(s=>s.confidence>0).slice(-8);
-  let confFactor=1;
+  let confFactor=1,confMomentum=0;
   if(confSess.length>=3){
-    const early=confSess.slice(0,Math.floor(confSess.length/2));
-    const recent2=confSess.slice(-Math.floor(confSess.length/2));
+    const n=confSess.length;
+    const xs=confSess.map((_,i)=>i);
+    const ys=confSess.map(s=>s.confidence);
+    const meanX=xs.reduce((a,v)=>a+v,0)/n;
+    const meanY=ys.reduce((a,v)=>a+v,0)/n;
+    const slope=(xs.reduce((a,v,i)=>a+(v-meanX)*(ys[i]-meanY),0))/(xs.reduce((a,v)=>a+(v-meanX)**2,0)||1);
+    confMomentum=slope; // positive = trending up
+    const early=confSess.slice(0,Math.floor(n/2));
+    const late=confSess.slice(-Math.floor(n/2));
     const avgE=early.reduce((a,s)=>a+s.confidence,0)/early.length;
-    const avgR=recent2.reduce((a,s)=>a+s.confidence,0)/recent2.length;
+    const avgR=late.reduce((a,s)=>a+s.confidence,0)/late.length;
     const trend=(avgR-avgE)/5;
-    confFactor=1+trend*0.06; // ±6% based on confidence trend
+    confFactor=1+trend*0.06*Math.min(1,1/diff); // harder subjects: confidence matters less (floor effects)
   }
 
-  // ── Topic coverage factor ──
+  // ── Topic coverage ──
   const topics=getTopicsForSubject(sub);
   const studiedTopics=new Set(subSess.filter(s=>s.topic).map(s=>s.topic));
   const coverage=topics.length?studiedTopics.size/topics.length:0.5;
-  const topicFactor=0.96+coverage*0.08; // 0.96 to 1.04
+  const topicFactor=0.96+coverage*0.08;
 
-  // ── Time pressure factor ──
-  // More days → more opportunity to study → slight boost
-  // Less days → depends on recent intensity
-  const days=Math.max(0,daysUntilTest||7);
+  // ── Time pressure ──
   let timeFactor=1;
-  if(days>30) timeFactor=1.03;       // plenty of time
-  else if(days>14) timeFactor=1.01;  // healthy runway
-  else if(days>7) timeFactor=0.99;   // getting close
-  else if(days>3) timeFactor=0.97;   // crunch
-  else timeFactor=0.95;              // last minute
+  if(days>30)timeFactor=1.03;
+  else if(days>14)timeFactor=1.01;
+  else if(days>7)timeFactor=0.99;
+  else if(days>3)timeFactor=0.97;
+  else timeFactor=0.95;
 
-  // ── Recency of study (last 3 days before test) ──
-  const veryRecent=subSess.filter(s=>s.date>=addDays(today(),-3));
+  // ── Study recency ──
+  const veryRecent=subSess.filter(s=>s.date>=addDays(todayStr,-3));
   const vrBoost=veryRecent.length>0?1.02:1;
 
-  // ── Score trend (trajectory of test scores themselves) ──
+  // ── COLD START: no test history but has study sessions ──
+  if(!subTests.length){
+    if(subSess.length<2)return null;
+    // Difficulty-calibrated baseline: harder subjects → naturally lower raw scores
+    // A student who studies hard can realistically start at 65/diff%
+    const baseline=Math.max(30,Math.min(72,62/Math.sqrt(diff)));
+    // Study intensity signal
+    const studySignal=avgHrs2wk>0?Math.min(1.1,1+(Math.log(1+recentHrs/Math.max(avgHrs2wk,1))*0.05)):1;
+    // Confidence signal (raw, not trend — no history to trend against)
+    const confSignal=decayedAvgConf>0?0.9+(decayedAvgConf/5)*0.2:1;
+    let pred=baseline*studySignal*confSignal*topicFactor*timeFactor;
+    pred=Math.min(88/diff*1.1,Math.max(20,pred+cramPenalty));
+    const point=Math.round(pred);
+    // Wide CI for cold start
+    const range=Math.round(15+diff*4);
+    const lo=Math.max(10,point-range);
+    const hi=Math.min(Math.round(92/diff*1.05),point+range);
+    const studyFactor=studySignal;
+    const factors=[
+      {label:'Estimated baseline', value:Math.round(baseline)+'%', icon:'📊'},
+      {label:'Study intensity', value:studyFactor>=1?`+${Math.round((studyFactor-1)*100)}%`:`${Math.round((studyFactor-1)*100)}%`, icon:'⏱', positive:studyFactor>=1},
+      {label:'Session confidence', value:decayedAvgConf.toFixed(1)+'/5', icon:'💪', positive:decayedAvgConf>=3},
+      {label:'Topic coverage', value:Math.round(coverage*100)+'%', icon:'📚', positive:coverage>0.4},
+      {label:'Subject difficulty', value:diff>=1.2?'Hard':diff>=1.05?'Challenging':'Standard', icon:'⚡', positive:false},
+    ];
+    return{point,lo,hi,base:baseline,studyFactor,confFactor:confSignal,topicFactor,timeFactor,coverage,factors,days,coldStart:true,diff};
+  }
+
+  // ── NORMAL PATH: has test history ──
+  const base=getSubjectScorePct(tests,subId)||50;
+
+  // Study intensity factor — dampened by difficulty (hard subjects: more study = smaller margin gain)
+  const studyFactor=avgHrs2wk>0
+    ?Math.min(1+(0.08/diff),1+(Math.log(1+recentHrs/Math.max(avgHrs2wk,1))*(0.06/Math.sqrt(diff))))
+    :1;
+
+  // ── Score trend (trajectory of past test results) ──
   let scoreTrend=0;
   if(subTests.length>=2){
     const last=subTests[subTests.length-1];
     const prev=subTests[subTests.length-2];
     const lastPct=last.score/last.outOf*100;
     const prevPct=prev.score/prev.outOf*100;
-    scoreTrend=(lastPct-prevPct)*0.15; // 15% of the score trend carries forward
+    scoreTrend=(lastPct-prevPct)*0.12;
+  }
+  // With 4+ tests, use regression over all data for a more stable trend
+  if(subTests.length>=4){
+    const ys=subTests.map(t=>t.score/t.outOf*100);
+    const n=ys.length;
+    const xs=ys.map((_,i)=>i);
+    const meanX=(n-1)/2, meanY=ys.reduce((a,v)=>a+v,0)/n;
+    const slope=(xs.reduce((a,v,i)=>a+(v-meanX)*(ys[i]-meanY),0))/(xs.reduce((a,v)=>a+(v-meanX)**2,0)||1);
+    scoreTrend=Math.max(-8,Math.min(8,slope*0.6));
   }
 
-  // ── Compose prediction ──
-  let pred=base*studyFactor*confFactor*topicFactor*timeFactor*vrBoost+scoreTrend;
-
-  // Hard cap: never above 96%, never below 20%
-  // Psychological: always room to improve
-  pred=Math.min(96,Math.max(20,pred));
-
-  // ── Confidence interval (±range based on volatility) ──
+  // ── Bayesian regression to mean: volatile histories shrink toward mean ──
   const scores=subTests.map(t=>t.score/t.outOf*100);
   const variance=scores.length>1?scores.reduce((a,v)=>a+Math.pow(v-base,2),0)/(scores.length-1):100;
   const stddev=Math.sqrt(variance);
-  const range=Math.round(Math.min(12,Math.max(3,stddev*0.7)));
+  // Small sample + high volatility → pull toward mean more
+  const shrinkage=Math.min(0.35,stddev/(stddev+15))*(1-Math.min(1,(subTests.length-1)/6));
+  const regressed=base*(1-shrinkage)+50*shrinkage;
 
-  const lo=Math.max(15,Math.round(pred-range));
-  const hi=Math.min(96,Math.round(pred+range));
+  // ── Compose prediction ──
+  let pred=regressed*studyFactor*confFactor*topicFactor*timeFactor*vrBoost+scoreTrend+cramPenalty;
+
+  // Cap scaled to difficulty — harder subjects have lower realistic ceilings
+  const hardCap=Math.min(96,Math.round(94/Math.pow(diff,0.5)));
+  const softFloor=Math.max(15,Math.round(20/Math.pow(diff,0.3)));
+  pred=Math.min(hardCap,Math.max(softFloor,pred));
+
+  // ── Confidence interval ──
+  const ciBase=Math.min(14,Math.max(3,stddev*0.65));
+  // Wider CI for fewer tests, high difficulty
+  const ciScale=1+Math.max(0,(4-subTests.length)*0.15)+(diff-1)*0.3;
+  const range=Math.round(ciBase*ciScale);
+  const lo=Math.max(softFloor-2,Math.round(pred-range));
+  const hi=Math.min(hardCap,Math.round(pred+range));
   const point=Math.round(pred);
 
-  // ── Factors breakdown for display ──
+  // ── Factors breakdown ──
   const factors=[
     {label:'Base (test history)', value:Math.round(base)+'%', icon:'📝'},
     {label:'Study intensity', value:studyFactor>=1?`+${Math.round((studyFactor-1)*100*base/100)}%`:`${Math.round((studyFactor-1)*100*base/100)}%`, icon:'⏱', positive:studyFactor>=1},
     {label:'Confidence trend', value:confFactor>=1?`+${Math.round((confFactor-1)*100*base/100)}%`:`${Math.round((confFactor-1)*100*base/100)}%`, icon:'💪', positive:confFactor>=1},
     {label:'Topic coverage', value:Math.round(coverage*100)+'%', icon:'📚', positive:coverage>0.5},
     {label:'Time until test', value:days>0?days+'d away':'Today', icon:'📅', positive:timeFactor>=1},
+    ...(cramRatio>0.5?[{label:'Study spread', value:'Cramming detected', icon:'⚠', positive:false}]:[]),
   ];
 
-  return{point,lo,hi,base,studyFactor,confFactor,topicFactor,timeFactor,coverage,factors,days};
+  return{point,lo,hi,base,studyFactor,confFactor,topicFactor,timeFactor,coverage,factors,days,diff,stddev,confMomentum};
 }
 
 function getTestGrade(pct){
@@ -536,6 +607,16 @@ function getTestGrade(pct){
   if(pct>=80)return{letter:'A',color:'var(--ok)'};
   if(pct>=70)return{letter:'B',color:'var(--acc)'};
   if(pct>=60)return{letter:'C',color:'var(--warn)'};
+  return{letter:'D',color:'var(--err)'};
+}
+// Grade adjusted for subject difficulty — shows what the score really means
+function getDifficultyGrade(pct,diff){
+  if(diff<1.05)return getTestGrade(pct);
+  const adj=pct*Math.pow(diff,0.65); // softer scaling than raw diff
+  if(adj>=90)return{letter:'A+',color:'var(--ok)'};
+  if(adj>=80)return{letter:'A',color:'var(--ok)'};
+  if(adj>=70)return{letter:'B',color:'var(--acc)'};
+  if(adj>=60)return{letter:'C',color:'var(--warn)'};
   return{letter:'D',color:'var(--err)'};
 }
 
@@ -619,7 +700,12 @@ async function syncPull(sc){
     return{ok:true,data:j.record.meridian};
   }catch{return{ok:false,err:'Network error'};}
 }
-function triggerSync(){if(IS_LOCAL)return;clearTimeout(syncDebounce);syncDebounce=setTimeout(async()=>{const sc=loadSync();if(!sc.apiKey)return;sc.status='syncing';saveSync(sc);updateSyncDot();const r=await syncPush(S.data,sc);sc.status=r.ok?'ok':'err';sc.lastSynced=r.ok?Date.now():sc.lastSynced;if(r.binId)sc.binId=r.binId;saveSync(sc);updateSyncDot();},1200);}
+function triggerSync(){
+  if(IS_LOCAL)return;
+  triggerFirebaseDataSync();
+  clearTimeout(syncDebounce);
+  syncDebounce=setTimeout(async()=>{const sc=loadSync();if(!sc.apiKey)return;sc.status='syncing';saveSync(sc);updateSyncDot();const r=await syncPush(S.data,sc);sc.status=r.ok?'ok':'err';sc.lastSynced=r.ok?Date.now():sc.lastSynced;if(r.binId)sc.binId=r.binId;saveSync(sc);updateSyncDot();},1200);
+}
 
 /* ════════════════════════════════
    FIRESTORE LEADERBOARD
@@ -651,6 +737,39 @@ function getLbUserId(){
   return id;
 }
 
+// ── Firebase user data sync ──
+// Stores full S.data in Firestore `users/{googleUid}`. Enables cross-device restore without JSONBin.
+async function saveUserData(googleUid){
+  if(!window.FIREBASE_CONFIG||!googleUid||!S.data)return;
+  const db=await getFirestoreDb();if(!db)return;
+  const{doc,setDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  try{
+    await setDoc(doc(db,'users',googleUid),{
+      data:S.data,
+      lbUid:getLbUserId(),
+      name:S.data.name||'',
+      updated:Date.now()
+    },{merge:true});
+  }catch(e){console.warn('User data save failed:',e);}
+}
+
+async function loadUserData(googleUid){
+  if(!window.FIREBASE_CONFIG||!googleUid)return null;
+  const db=await getFirestoreDb();if(!db)return null;
+  const{doc,getDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
+  try{
+    const snap=await getDoc(doc(db,'users',googleUid));
+    return snap.exists()?snap.data():null;
+  }catch(e){console.warn('User data load failed:',e);return null;}
+}
+
+let _fbSyncDebounce=null;
+function triggerFirebaseDataSync(){
+  if(!S.googleUser?.uid||IS_LOCAL)return;
+  clearTimeout(_fbSyncDebounce);
+  _fbSyncDebounce=setTimeout(()=>saveUserData(S.googleUser.uid),3000);
+}
+
 function buildLbStats(data){
   if(!data)return null;
   const sess=data.sessions||[];
@@ -671,10 +790,14 @@ function buildLbStats(data){
       subjectStats[sub.name]={weekMins:wm,totalMins:tm,avgScore:avg,testCount:subTests.length,sessCount:subSess.length};
     }
   });
+  // Last week's study minutes (Mon–Sun of the previous week)
+  const lastMon=addDays(mon,-7),lastSun=addDays(mon,-1);
+  const lastWeekMins=sess.filter(s=>s.date>=lastMon&&s.date<=lastSun&&s.subject!=='grace').reduce((a,s)=>a+s.duration,0);
   return{
     name:data.name||'Anonymous',
     totalMins:totalMins(sess),
     weekMins:weekMins(sess),
+    lastWeekMins,
     streak:getStreak(sess),
     bestStreak:getBest(sess),
     sessCount:sess.filter(s=>s.subject!=='grace').length,
@@ -830,8 +953,35 @@ function updateSyncDot(){const d=document.querySelector('.sync-dot');if(!d)retur
 ════════════════════════════════ */
 let timerInt=null,timerStart=0,timerElap=0,timerRunning=false,timerTarget=25*60;
 let breakInt=null,breakElap=0,breakTarget=5*60;
-function startTimer(){timerStart=Date.now()-timerElap*1000;timerRunning=true;clearInterval(timerInt);timerInt=setInterval(()=>{timerElap=Math.floor((Date.now()-timerStart)/1000);if(timerElap>=timerTarget){timerElap=timerTarget;clearInterval(timerInt);timerRunning=false;Ambient.stop();S.pomodoroCount++;S.pomodoroBreak=true;breakElap=0;breakTarget=S.pomodoroCount%4===0?20*60:5*60;startBreak();renderTimerFast();showToast('Timer done — take a break, then log your session','⏱');}else renderTimerFast();},500);}
-function startBreak(){clearInterval(breakInt);breakInt=setInterval(()=>{breakElap++;if(breakElap>=breakTarget){clearInterval(breakInt);S.pomodoroBreak=false;showToast('Break over — log your session or start another round','🔔');if(S.view==='timer')render();}else if(S.view==='timer')renderBreakFast();},1000);}
+function fireNotif(title,body){if('Notification' in window&&Notification.permission==='granted'){new Notification(title,{body,icon:'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" rx="7" fill="%2328221A"/><text x="16" y="22" text-anchor="middle" font-size="18">📚</text></svg>'});}}
+function startTimer(){
+  // Request notification permission when a timer is started
+  if('Notification' in window&&Notification.permission==='default')Notification.requestPermission();
+  timerStart=Date.now()-timerElap*1000;timerRunning=true;clearInterval(timerInt);
+  timerInt=setInterval(()=>{
+    timerElap=Math.floor((Date.now()-timerStart)/1000);
+    if(timerElap>=timerTarget){
+      timerElap=timerTarget;clearInterval(timerInt);timerRunning=false;Ambient.stop();
+      S.pomodoroCount++;S.pomodoroBreak=true;breakElap=0;
+      breakTarget=S.pomodoroCount%4===0?20*60:5*60;
+      startBreak();renderTimerFast();
+      showToast('Timer done — take a break, then log your session','⏱');
+      fireNotif('Meridian — session complete!',`${Math.round(timerTarget/60)} min session done. Time for a ${S.pomodoroCount%4===0?'20':'5'}-min break.`);
+    }else renderTimerFast();
+  },500);
+}
+function startBreak(){
+  clearInterval(breakInt);
+  breakInt=setInterval(()=>{
+    breakElap++;
+    if(breakElap>=breakTarget){
+      clearInterval(breakInt);S.pomodoroBreak=false;
+      showToast('Break over — log your session or start another round','🔔');
+      fireNotif('Meridian — break over!','Time to get back to it. Log your session or start another round.');
+      if(S.view==='timer')render();
+    }else if(S.view==='timer')renderBreakFast();
+  },1000);
+}
 function renderBreakFast(){const rem=Math.max(0,breakTarget-breakElap),m=Math.floor(rem/60),s=rem%60;const el=document.getElementById('break-timer');if(el)el.textContent=`${String(m).padStart(2,'0')}:${String(s).padStart(2,'0')}`;}
 function skipBreak(){clearInterval(breakInt);S.pomodoroBreak=false;render();}
 function pauseTimer(){clearInterval(timerInt);timerRunning=false;timerElap=Math.floor((Date.now()-timerStart)/1000);}
@@ -1239,6 +1389,7 @@ let S={
   regSubjects:['chem','bio','phys','max','mae','eng'],
   tutStep:0,showOnboardComplete:false,
   googleUser:null,
+  _authRestoring:false,
   // Papers library
   papersSubFilter:'All',    // subject filter
   papersYrFilter:'All',     // 'All' / 'Yr 11' / 'Yr 12'
@@ -1389,8 +1540,51 @@ const ALL_PRESET_SUBS = [
   {id:'indo', name:'Indonesian',           abbr:'ID', target:45, icsCode:'',        color:2},
 ];
 
+// Subject inherent difficulty coefficient (1.0 = standard; higher = harder to score high)
+// Based on NSW HSC statistical distributions and general academic consensus
+const SUBJECT_DIFFICULTY = {
+  mx2:1.65, max:1.38, phys:1.32, chem:1.28, hext:1.22, ex2:1.22, esci:1.15,
+  ex1:1.15, mae:1.12, chn:1.18, jpn:1.12, fre:1.1, ger:1.1, ita:1.1,
+  kor:1.1, lat:1.18, eco:1.06, bio:1.02, eng:1.0, legal:1.0, mod:1.0,
+  anc:1.0, geo:0.97, sac:0.97, ens:0.93, mst:0.95, ms1:0.88,
+  sor1:0.95, sor2:0.95, bus:0.95, pdhpe:0.9, cafs:0.9, est:1.05,
+  sdd:1.0, ipt:0.98, vis:0.88, mus:0.88, mus2:0.92, dra:0.9,
+  hms:0.85, vet:0.85, vetc:0.82, food:0.87, txtl:0.87, ind:0.88, ag:0.9,
+};
+function getSubjectDifficulty(sub){
+  if(!sub)return 1.0;
+  const d=SUBJECT_DIFFICULTY[sub.id];
+  if(d)return d;
+  const n=(sub.name||'').toLowerCase();
+  if(/ext(ension)?\s*2|4u/i.test(n))return 1.65;
+  if(/ext(ension)?\s*1|3u/i.test(n))return 1.38;
+  if(/physics/i.test(n))return 1.32;
+  if(/chem/i.test(n))return 1.28;
+  if(/math.*(adv|ext)|ext.*math/i.test(n))return 1.12;
+  if(/english.*ext|ext.*english/i.test(n))return 1.15;
+  if(/history.*ext|extension.*hist/i.test(n))return 1.22;
+  if(/economics/i.test(n))return 1.06;
+  return 1.0;
+}
+// Returns a contextual label for a score given subject difficulty
+function getDifficultyContext(pct, diff){
+  if(diff<1.05)return null; // only contextualise genuinely hard subjects
+  // Adjust thresholds upward by difficulty — e.g. in Ext2 (1.65), 55% ≈ "good"
+  const adj=pct*diff;
+  if(adj>=90)return 'outstanding for this subject';
+  if(adj>=80)return 'excellent for this subject';
+  if(adj>=70)return 'strong result';
+  if(adj>=60)return 'solid — above average for this subject';
+  if(adj>=50)return 'respectable — this subject is genuinely hard';
+  return null;
+}
+
 function renderLogin(){
   if(S.showOnboardComplete) return renderOnboardComplete();
+  if(S._authRestoring) return`<div style="display:flex;flex-direction:column;align-items:center;justify-content:center;height:80vh;gap:16px;">
+    <div class="lb-spinner" style="width:32px;height:32px;border-width:3px;"></div>
+    <div style="font-size:14px;color:var(--tx2);">Restoring your account…</div>
+  </div>`;
   // Auto-login: if account exists and authed flag set, show quick-resume screen
   const d = loadLocal();
   if(d && !S.showPinEntry) return renderAutoAuth(d);
@@ -1633,7 +1827,7 @@ function renderOnboardComplete(){
    SHELL
 ════════════════════════════════ */
 function renderShell(){
-  const vs={dashboard:renderDash,timetable:renderTimetable,history:renderHistory,progress:renderProgress,stats:renderStats,papers:renderPapers,timer:renderTimer,settings:renderSettings,leaderboard:renderLeaderboard};
+  const vs={dashboard:renderDash,timetable:renderTimetable,history:renderHistory,progress:renderProgress,stats:renderStats,papers:renderPapers,timer:renderTimer,settings:renderSettings,leaderboard:renderLeaderboard,assess:renderAssess,todo:renderTodo};
   const sc=loadSync();
   const hasTT=(S.data?.timetable||[]).length>0;
   const todayClasses=getTodayTT(S.data?.timetable||[]).length;
@@ -1648,8 +1842,11 @@ function renderShell(){
   </div>
   <div class="wrap">
     <nav class="side dsk">
-      ${[['dashboard','◉','Dashboard'],['timetable','☰','Timetable'],['leaderboard','◈','Leaderboard'],['history','◔','History'],['progress','△','Progress'],['stats','◇','Stats'],['papers','◧','Papers'],['timer','◷','Timer']].map(([v,i,l])=>`
-        <div class="si${S.view===v?' on':''}" data-action="nav-${v}"><span class="ico">${i}</span>${l}${v==='timetable'&&hasTT&&todayClasses>0?`<span class="si-badge">${todayClasses}</span>`:''}</div>`).join('')}
+      ${[['dashboard','◉','Dashboard'],['timetable','☰','Timetable'],['assess','◫','Assessments'],['todo','✓','To-Do'],['leaderboard','◈','Leaderboard'],['history','◔','History'],['progress','△','Progress'],['stats','◇','Stats'],['papers','◧','Papers'],['timer','◷','Timer']].map(([v,i,l])=>{
+        const pendingTodos=(S.data?.todos||[]).filter(t=>!t.done&&(!t.due||t.due<=today())).length;
+        const upcomingAssess=(S.data?.assessments||[]).filter(a=>!a.done&&a.date>=today()&&daysUntil(a.date)<=7).length;
+        return`<div class="si${S.view===v?' on':''}" data-action="nav-${v}"><span class="ico">${i}</span>${l}${v==='timetable'&&hasTT&&todayClasses>0?`<span class="si-badge">${todayClasses}</span>`:''}${v==='todo'&&pendingTodos>0?`<span class="si-badge">${pendingTodos}</span>`:''}${v==='assess'&&upcomingAssess>0?`<span class="si-badge si-badge-warn">${upcomingAssess}</span>`:''}</div>`;
+      }).join('')}
       <div class="si-sec">Account</div>
       <div class="si${S.view==='settings'?' on':''}" data-action="nav-settings"><span class="ico">⚙</span>Settings</div>
       <div class="side-logbtn" data-action="open-log">+ Log Session</div>
@@ -1665,12 +1862,14 @@ function renderShell(){
       <div class="fab${todaySess(S.data?.sessions||[]).length===0?' fab-nudge':''}" data-action="open-log">＋</div>
     </div>
     <div class="bni${S.view==='progress'?' on':''}" data-action="nav-progress"><span class="bni-ic">△</span>Progress<div class="bni-dot"></div></div>
-    <div class="bni${['timetable','papers','history','stats','settings','leaderboard'].includes(S.view)?' on':''}" data-action="toggle-more"><span class="bni-ic">⋯</span>More<div class="bni-dot"></div></div>
+    <div class="bni${['timetable','papers','history','stats','settings','leaderboard','assess','todo'].includes(S.view)?' on':''}" data-action="toggle-more"><span class="bni-ic">⋯</span>More<div class="bni-dot"></div></div>
   </nav>
   ${S.moreMenu?`<div class="more-menu-overlay" data-action="close-more"></div>
   <div class="more-menu" id="more-sheet">
     <div class="more-menu-handle" data-action="close-more"></div>
     <div class="more-item${S.view==='timetable'?' on':''}" data-action="more-nav" data-view="timetable"><span class="more-item-ic">☰</span>Schedule</div>
+    <div class="more-item${S.view==='assess'?' on':''}" data-action="more-nav" data-view="assess"><span class="more-item-ic">◫</span>Assessments</div>
+    <div class="more-item${S.view==='todo'?' on':''}" data-action="more-nav" data-view="todo"><span class="more-item-ic">✓</span>To-Do</div>
     <div class="more-item${S.view==='leaderboard'?' on':''}" data-action="more-nav" data-view="leaderboard"><span class="more-item-ic">◈</span>Leaderboard</div>
     <div class="more-item${S.view==='papers'?' on':''}" data-action="more-nav" data-view="papers"><span class="more-item-ic">◧</span>Papers</div>
     <div class="more-item${S.view==='history'?' on':''}" data-action="more-nav" data-view="history"><span class="more-item-ic">◔</span>History</div>
@@ -2695,11 +2894,13 @@ function renderProgress(){
   function renderScoresTab(){
     const{tests=[],subjects,sessions}=S.data;
     const real=sessions.filter(s=>s.subject!=='grace');
-    if(!tests.length) return`
+    // Check if there are any subjects with enough data (tests OR 2+ sessions) for predictions
+    const hasPredData=subjects.some(sub=>tests.some(t=>t.subject===sub.id)||real.filter(s=>s.subject===sub.id).length>=2);
+    if(!hasPredData) return`
     <div class="empty">
       <div class="empty-e">📝</div>
-      <div class="empty-t">No test scores yet</div>
-      <div class="empty-s">Tap "＋ Log Test Score" to record a result. Once you have scores, Meridian will predict your next one.</div>
+      <div class="empty-t">No scores or study data yet</div>
+      <div class="empty-s">Log a test score, or study a few sessions — Meridian will start predicting your next result.</div>
     </div>
     <button class="log-submit" data-action="open-log-test" style="margin-top:12px;">＋ Log Test Score</button>`;
 
@@ -2720,53 +2921,77 @@ function renderProgress(){
       <div class="ntc-action" data-action="open-log-test">Log score</div>
     </div>`:'';
 
-    // Prediction cards for each subject with tests
-    const subjectsWithTests=subjects.filter(sub=>tests.some(t=>t.subject===sub.id));
-    const predCards=subjectsWithTests.map(sub=>{
+    // Prediction cards: subjects with tests + subjects with sessions but no tests (cold start)
+    const subjectsWithData=subjects.filter(sub=>{
+      const hasSess=sessions.filter(s=>s.subject===sub.id&&s.subject!=='grace').length>=2;
+      const hasTest=tests.some(t=>t.subject===sub.id);
+      return hasTest||hasSess;
+    });
+    const predCards=subjectsWithData.map(sub=>{
       const subTests=getSubjectTests(tests,sub.id);
       const nextT=upcoming.find(t=>t.subject===sub.id);
       const daysToNext=nextT?daysUntil(nextT.nextTestDate):30;
       const pred=predictNextScore(S.data,sub.id,daysToNext);
       const c=getSubjColor(sub);
       const avgPct=getSubjectScorePct(tests,sub.id);
-      const grade=avgPct?getTestGrade(avgPct):{letter:'—',color:'var(--tx3)'};
+      const subDiff=getSubjectDifficulty(sub);
+      // Use difficulty-adjusted grade for display
+      const grade=avgPct?getDifficultyGrade(avgPct,subDiff):{letter:'—',color:'var(--tx3)'};
+      const diffCtx=avgPct?getDifficultyContext(avgPct,subDiff):null;
+      const hardBadge=subDiff>=1.2?'Hard':subDiff>=1.08?'Challenging':null;
 
       // Mini bar chart of test history
-      const maxScore=Math.max(...subTests.map(t=>t.score/t.outOf*100),1);
       const bars=subTests.slice(-6).map(t=>{
         const pct=t.score/t.outOf*100;
-        const g=getTestGrade(pct);
+        const g=getDifficultyGrade(pct,subDiff);
         const h=Math.max(4,Math.round((pct/100)*36));
         return`<div class="thm-bar" style="height:${h}px;background:${g.color};" title="${pct.toFixed(0)}% — ${t.name}"></div>`;
       }).join('');
 
-      // Improvement tip
+      // Improvement tip — richer, difficulty-aware
       let tip='';
-      if(pred){
-        const gap=pred.point-avgPct;
-        if(pred.coverage<0.5){tip=`Cover more topics — you've studied ${Math.round(pred.coverage*100)}% of the ${sub.name} curriculum.`;}
-        else if(pred.confFactor<1){tip=`Confidence is trending down in ${sub.name}. Review the basics — could be a gap in fundamentals.`;}
-        else if(pred.studyFactor<1){tip=`Study hours are below your average for ${sub.name} lately. Bump it up in the next ${pred.days||14} days.`;}
-        else if(gap>0){tip=`You're on track to improve by ~${gap.toFixed(0)} points. Keep the current pace.`;}
+      if(pred&&!pred.coldStart){
+        const gap=pred.point-(avgPct||50);
+        if(pred.coverage<0.5){
+          tip=`Cover more topics — you've studied ${Math.round(pred.coverage*100)}% of the ${sub.name} curriculum.`;
+        } else if(pred.confFactor<0.97){
+          tip=`Confidence is trending down in ${sub.name}. Try doing past papers or re-reading core concepts — could be a knowledge gap.`;
+        } else if(pred.studyFactor<0.98){
+          tip=`Study hours are below your average for ${sub.name} lately. Bump it up over the next ${pred.days||14} days.`;
+        } else if(pred.confMomentum&&pred.confMomentum>0.3){
+          tip=`Your confidence is accelerating in ${sub.name} — momentum is real. Keep the consistency.`;
+        } else if(gap>3){
+          tip=`On track to improve by ~${gap.toFixed(0)}%. Keep the current pace.`;
+        } else if(subDiff>=1.2&&avgPct>=55){
+          tip=`${Math.round(avgPct)}% in ${sub.name} is a genuinely strong result — this is one of the hardest subjects. Don't underestimate it.`;
+        }
+      } else if(pred?.coldStart){
+        tip=`First prediction — log a test result to sharpen this estimate.`;
       }
+
+      // Difficulty-adjusted pred description
+      const predLabel=pred?.coldStart?'Estimated first result':'Predicted next score';
+      const predSub=pred?.coldStart
+        ?`Study-based estimate — no test history yet. Wide range is normal.`
+        :`Based on ${subTests.length} test${subTests.length!==1?'s':''}, study pace, topic coverage &amp; consistency.`;
 
       return`<div class="scores-subject-block">
         <div class="scores-subject-hd">
           <div style="width:30px;height:30px;border-radius:7px;background:${c.bg};border:1px solid ${c.bd};display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;color:${c.tx};font-weight:500;">${sub.abbr}</div>
           <div style="flex:1;">
-            <div style="font-size:13.5px;font-weight:500;color:var(--tx);letter-spacing:-.01em;">${sub.name}</div>
-            <div style="font-size:11px;color:var(--tx3);">${subTests.length} test${subTests.length!==1?'s':''} · avg <span style="color:${grade.color};font-weight:500;">${avgPct?.toFixed(0)||'—'}%</span></div>
+            <div style="font-size:13.5px;font-weight:500;color:var(--tx);letter-spacing:-.01em;">${sub.name}${hardBadge?` <span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,180,0,.15);color:#d4900a;vertical-align:middle;">${hardBadge}</span>`:''}</div>
+            <div style="font-size:11px;color:var(--tx3);">${subTests.length?`${subTests.length} test${subTests.length!==1?'s':''} · avg `:'No tests yet · '}${avgPct!=null?`<span style="color:${grade.color};font-weight:500;">${avgPct.toFixed(0)}%${diffCtx?` <span style="font-weight:400;color:var(--tx3);">— ${diffCtx}</span>`:''}</span>`:'<span style="color:var(--tx3);">studying</span>'}</div>
           </div>
           <div class="test-history-mini">${bars}</div>
         </div>
 
-        ${pred?`<div class="pred-card">
-          <div class="pred-label">Predicted next score${nextT?' · '+nextDays+'d away':''}</div>
+        ${pred?`<div class="pred-card${pred.coldStart?' pred-card-cold':''}">
+          <div class="pred-label">${predLabel}${nextT?' · '+daysToNext+'d away':''}</div>
           <div class="pred-range-row">
             <div class="pred-main">${pred.point}<span class="pred-pct">%</span></div>
             <div class="pred-range">${pred.lo}–${pred.hi}%</div>
           </div>
-          <div class="pred-sub">Range based on ${subTests.length} past test${subTests.length!==1?'s':''}, study pace &amp; topic coverage. Never shown above 96%.</div>
+          <div class="pred-sub">${predSub}</div>
           <div class="pred-bar-track">
             <div class="pred-bar-fill" style="width:${pred.point}%;background:linear-gradient(90deg,rgba(255,255,255,.3),rgba(255,255,255,.7));"></div>
           </div>
@@ -2778,19 +3003,21 @@ function renderProgress(){
             </div>`).join('')}
           </div>
         </div>`:
-        `<div class="insight-card info"><div class="insight-icon">💡</div><div class="insight-text"><div class="insight-title">Log more data for predictions</div><div class="insight-body">Need at least 1 test score and some study sessions to generate a prediction for ${sub.name}.</div></div></div>`}
+        `<div class="insight-card info"><div class="insight-icon">💡</div><div class="insight-text"><div class="insight-title">Log more data for predictions</div><div class="insight-body">Need at least 2 study sessions to generate an estimate for ${sub.name}.</div></div></div>`}
 
         ${subTests.slice().reverse().map(t=>{
           const pct=t.score/t.outOf*100;
           const g=getTestGrade(pct);
+          const dg=getDifficultyGrade(pct,subDiff);
+          const ctx=getDifficultyContext(pct,subDiff);
           return`<div class="test-card">
-            <div class="test-score-circle" style="border-color:${g.color};color:${g.color};">
+            <div class="test-score-circle" style="border-color:${dg.color};color:${dg.color};">
               <div class="test-score-pct">${pct.toFixed(0)}%</div>
-              <div class="test-score-grade">${g.letter}</div>
+              <div class="test-score-grade">${dg.letter}</div>
             </div>
             <div class="test-info">
               <div class="test-name">${t.name}</div>
-              <div class="test-meta">${fmtDate(t.date)} · ${t.type}</div>
+              <div class="test-meta">${fmtDate(t.date)} · ${t.type}${ctx?` · <em style="font-style:normal;color:var(--acc);">${ctx}</em>`:''}</div>
             </div>
             <div class="test-raw">${t.score}/${t.outOf}</div>
             <div class="test-actions">
@@ -2800,7 +3027,7 @@ function renderProgress(){
           </div>`;
         }).join('')}
 
-        ${tip?`<div class="improve-tip">💡 <strong>To improve:</strong> ${tip}</div>`:''}
+        ${tip?`<div class="improve-tip">💡 <strong>${pred?.coldStart?'Tip':'To improve'}:</strong> ${tip}</div>`:''}
       </div>`;
     }).join('');
 
@@ -3587,6 +3814,266 @@ function renderTimer(){
 }
 
 /* ════════════════════════════════
+   ASSESSMENT TRACKER VIEW
+════════════════════════════════ */
+const ASSESS_TYPES=['Quiz','Test','Assessment','Exam','Assignment','Task','Trial','Report','Presentation'];
+function renderAssess(){
+  const{subjects=[],sessions=[],assessments=[]}=S.data;
+  const todayStr=today();
+
+  const upcoming=assessments.filter(a=>!a.done&&a.date>=todayStr).sort((a,b)=>a.date.localeCompare(b.date));
+  const overdue=assessments.filter(a=>!a.done&&a.date<todayStr).sort((a,b)=>b.date.localeCompare(a.date));
+  const done=assessments.filter(a=>a.done).sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
+
+  function studyRec(a){
+    const sub=subjects.find(s=>s.id===a.subject);
+    if(!sub)return null;
+    const daysLeft=daysUntil(a.date);
+    const subSess=sessions.filter(s=>s.subject===a.subject&&s.subject!=='grace').sort((a,b)=>b.date.localeCompare(a.date));
+    const lastSess=subSess[0];
+    const daysSince=lastSess?Math.max(0,Math.round((new Date(todayStr)-new Date(lastSess.date))/86400000)):null;
+    const topics=getTopicsForSubject(sub);
+    const studiedTopics=new Set(subSess.filter(s=>s.topic).map(s=>s.topic));
+    const uncovered=topics.filter(t=>!studiedTopics.has(t));
+    const urgent=daysLeft<=7||(daysSince!=null&&daysSince>5&&daysLeft<=14);
+    const verySoon=daysLeft<=3;
+    let rec='';
+    if(verySoon&&(daysSince==null||daysSince>2)){rec=`${daysSince>2?`Haven't studied in ${daysSince}d — it`:'It'}'s ${daysLeft<=1?'tomorrow':'in '+daysLeft+'d'}. Review core concepts now.`;}
+    else if(urgent&&uncovered.length>0){rec=`${uncovered.length} topic${uncovered.length>1?'s':''} not yet covered — ${daysLeft}d to go.`;}
+    else if(daysSince>7&&daysLeft<=21){rec=`Last studied ${daysSince}d ago. Don't leave it too long.`;}
+    else if(uncovered.length>0&&daysLeft<=30){rec=`Topics to cover: ${uncovered.slice(0,2).join(', ')}${uncovered.length>2?`, +${uncovered.length-2} more`:''}.`;}
+    return{rec,urgent,verySoon,daysSince,uncovered,daysLeft};
+  }
+
+  // ── Horizontal 14-day scrollable day strip ──
+  function renderDayStrip(){
+    const days=[];
+    for(let i=0;i<14;i++)days.push(addDays(todayStr,i));
+    const assessDates=new Map();
+    assessments.filter(a=>!a.done&&a.date>=todayStr).forEach(a=>{
+      if(!assessDates.has(a.date))assessDates.set(a.date,[]);
+      assessDates.get(a.date).push(a);
+    });
+    const dayLetters=['Su','Mo','Tu','We','Th','Fr','Sa'];
+    return`<div class="assess-strip-wrap">
+      <div class="assess-strip">
+        ${days.map(d=>{
+          const isToday=d===todayStr;
+          const as=assessDates.get(d)||[];
+          const hasA=as.length>0;
+          const dt=new Date(d+'T12:00:00');
+          const dayNum=dt.getDate();
+          const dayLetter=dayLetters[dt.getDay()];
+          return`<div class="assess-strip-day${isToday?' is-today':''}${hasA?' has-assess':''}">
+            <div class="asd-letter">${dayLetter}</div>
+            <div class="asd-num">${dayNum}</div>
+            <div class="asd-dots">${as.slice(0,3).map(a=>{const sub=subjects.find(s=>s.id===a.subject);const c=getSubjColor(sub||{color:0});return`<div class="asd-dot" style="background:${c.bd}" title="${esc(a.name)}"></div>`;}).join('')}</div>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>`;
+  }
+
+  function renderAssessCard(a,past=false){
+    const sub=subjects.find(s=>s.id===a.subject);
+    const c=sub?getSubjColor(sub):{bg:'var(--srf2)',bd:'var(--bdS)',tx:'var(--tx3)'};
+    const dLeft=daysUntil(a.date);
+    const dLabel=past?null:(dLeft===0?'Today':dLeft===1?'Tmrw':null);
+    const rec=past?null:studyRec(a);
+    const urgentClass=rec?.verySoon?' ac-urgent':rec?.urgent?' ac-warn':'';
+    return`<div class="ac${urgentClass}${a.done?' ac-done':''}">
+      <div class="ac-left">
+        ${past
+          ?`<div class="ac-past-date">${fmtDate(a.date)}</div>`
+          :dLabel
+            ?`<div class="ac-day-label${dLeft===0?' ac-today':''}">${dLabel}</div>`
+            :`<div class="ac-day-num">${dLeft}</div><div class="ac-day-unit">days</div>`}
+        ${a.weight?`<div class="ac-weight">${a.weight}%</div>`:''}
+      </div>
+      <div class="ac-body">
+        <div class="ac-name">${esc(a.name)}</div>
+        <div class="ac-meta">
+          ${sub?`<span class="assess-sub-tag" style="background:${c.bg};border-color:${c.bd};color:${c.tx};">${esc(sub.abbr)}</span>`:''}
+          <span class="ac-type">${a.type}</span>
+          ${a.notes?`<span class="ac-notes-p">· ${esc(a.notes.slice(0,40))}${a.notes.length>40?'…':''}</span>`:''}
+        </div>
+        ${rec?.rec?`<div class="ac-rec${rec.verySoon?' ac-rec-urgent':rec.urgent?' ac-rec-warn':''}">${rec.rec}</div>`:''}
+      </div>
+      <div class="ac-actions">
+        ${!past?`<div class="assess-done-btn" data-action="assess-done" data-id="${a.id}" title="Mark done">✓</div>`:''}
+        <div class="edit-btn" data-action="assess-edit" data-id="${a.id}" title="Edit">✎</div>
+        <div class="del-btn" data-action="assess-del" data-id="${a.id}" title="Delete">✕</div>
+      </div>
+    </div>`;
+  }
+
+  const overallRecs=upcoming.map(a=>({a,r:studyRec(a)})).filter(x=>x.r?.urgent).sort((a,b)=>a.r.daysLeft-b.r.daysLeft);
+
+  return`<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;">
+    <div class="pg-title" style="margin-bottom:0;">Assessments</div>
+    <button class="icon-add-btn" data-action="open-add-assess">＋ Add</button>
+  </div>
+  ${overallRecs.length?`<div class="assess-banner">
+    <div class="assess-banner-days">
+      <span class="assess-banner-num">${overallRecs[0].r.daysLeft<=1?'tmrw':overallRecs[0].r.daysLeft}</span>
+      ${overallRecs[0].r.daysLeft>1?`<span class="assess-banner-dunit">days</span>`:''}
+    </div>
+    <div class="assess-banner-body">
+      <div class="assess-banner-label">Priority assessment</div>
+      <div class="assess-banner-name">${esc(overallRecs[0].a.name)}</div>
+      <div class="assess-banner-sub">${overallRecs[0].r.daysLeft<=1?'Due tomorrow — review core content now':overallRecs[0].r.daysLeft<=7?`${overallRecs[0].r.daysLeft} days away — increase study frequency`:`${overallRecs[0].r.uncovered.length} topic${overallRecs[0].r.uncovered.length!==1?'s':''} uncovered`}</div>
+    </div>
+  </div>`:''}
+  ${renderDayStrip()}
+  ${!upcoming.length&&!overdue.length?`<div class="empty" style="padding-top:32px;"><div class="empty-e">📋</div><div class="empty-t">No upcoming assessments</div><div class="empty-s">Add tests, assignments and exams above.</div></div>`:''}
+  ${overdue.length?`<div class="assess-section-hd assess-overdue-hd">Overdue <span class="assess-count assess-count-red">${overdue.length}</span></div>${overdue.map(a=>renderAssessCard(a)).join('')}`:''}
+  ${upcoming.length?`<div class="assess-section-hd">Upcoming <span class="assess-count">${upcoming.length}</span></div>${upcoming.map(a=>renderAssessCard(a)).join('')}`:''}
+  ${done.length?`<div class="assess-section-hd" style="margin-top:20px;">Recently done</div>${done.map(a=>renderAssessCard(a,true)).join('')}`:''}`;
+}
+
+function renderAddAssessModal(){
+  const{subjects=[]}=S.data;
+  const isEdit=!!S._assessEdit;
+  const ea=isEdit?S._assessEdit:{};
+  return`<div class="overlay" data-action="close-modal-out">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="mhandle" data-action="close-modal"></div>
+        <div class="modal-close-x" data-action="close-modal">✕</div>
+        <div class="mtitle">${isEdit?'Edit Assessment':'Add Assessment'}</div>
+        <div class="msub">Track upcoming tests, assignments and exams.</div>
+      </div>
+      <div class="modal-body">
+        <div class="m-lbl">Name</div>
+        <input type="text" id="assess-name" class="team-input" placeholder="e.g. Chemistry Module 3 Test" maxlength="60" value="${esc(ea.name||'')}" autofocus>
+        <div class="m-lbl" style="margin-top:14px;">Subject</div>
+        <select id="assess-sub" class="team-input">
+          <option value="">— none —</option>
+          ${subjects.map(s=>`<option value="${s.id}"${ea.subject===s.id?' selected':''}>${esc(s.name)}</option>`).join('')}
+        </select>
+        <div class="form-row" style="display:flex;gap:10px;margin-top:14px;">
+          <div style="flex:1;">
+            <div class="m-lbl">Date</div>
+            <input type="date" id="assess-date" class="team-input" value="${ea.date||addDays(today(),7)}">
+          </div>
+          <div style="flex:1;">
+            <div class="m-lbl">Type</div>
+            <select id="assess-type" class="team-input">
+              ${ASSESS_TYPES.map(t=>`<option${ea.type===t?' selected':''}>${t}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <div class="m-lbl" style="margin-top:14px;">Weight % <span style="font-weight:300;color:var(--tx3);">— optional</span></div>
+        <input type="number" id="assess-weight" class="team-input" placeholder="e.g. 20" min="1" max="100" value="${ea.weight||''}">
+        <div class="m-lbl" style="margin-top:14px;">Notes <span style="font-weight:300;color:var(--tx3);">— optional</span></div>
+        <input type="text" id="assess-notes" class="team-input" placeholder="Topics, format, etc." maxlength="120" value="${esc(ea.notes||'')}">
+        <button class="m-submit" data-action="save-assess" style="margin-top:20px;">${isEdit?'Save changes':'Add Assessment'}</button>
+        ${isEdit?`<button class="m-submit" data-action="assess-del" data-id="${ea.id}" style="margin-top:8px;background:var(--err);opacity:.8;">Delete</button>`:''}
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ════════════════════════════════
+   TO-DO LIST VIEW
+════════════════════════════════ */
+function renderTodo(){
+  const todos=(S.data.todos||[]);
+  const{subjects=[]}=S.data;
+  const todayStr=today();
+  const tomorrowStr=addDays(todayStr,1);
+
+  const pending=todos.filter(t=>!t.done);
+  const doneItems=todos.filter(t=>t.done).sort((a,b)=>(b.doneAt||0)-(a.doneAt||0)).slice(0,10);
+
+  const overdue=pending.filter(t=>t.due&&t.due<todayStr).sort((a,b)=>a.due.localeCompare(b.due));
+  const todayItems=pending.filter(t=>t.due===todayStr);
+  const tomorrowItems=pending.filter(t=>t.due===tomorrowStr);
+  const upcomingItems=pending.filter(t=>t.due&&t.due>tomorrowStr).sort((a,b)=>a.due.localeCompare(b.due));
+  const nodateItems=pending.filter(t=>!t.due);
+
+  function renderTodoItem(t,showDue=false){
+    const sub=subjects.find(s=>s.id===t.subject);
+    const c=sub?getSubjColor(sub):{bg:'var(--srf2)',bd:'var(--bdS)',tx:'var(--tx3)'};
+    const isOverdue=!!(t.due&&t.due<todayStr&&!t.done);
+    return`<div class="ti${t.done?' ti-done':''}${isOverdue?' ti-overdue':''}" data-id="${t.id}">
+      <div class="ti-check${t.done?' ti-checked':''}" data-action="todo-toggle" data-id="${t.id}">
+        ${t.done?`<svg viewBox="0 0 12 12" fill="none" width="10" height="10"><polyline points="2,6 5,9 10,3" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/></svg>`:''}
+      </div>
+      <div class="ti-body">
+        <div class="ti-text">${esc(t.text)}</div>
+        ${sub||(showDue&&t.due&&!t.done)?`<div class="ti-meta">
+          ${sub?`<span class="assess-sub-tag" style="background:${c.bg};border-color:${c.bd};color:${c.tx};font-size:9px;">${esc(sub.abbr)}</span>`:''}
+          ${showDue&&t.due&&!t.done?`<span class="ti-due${isOverdue?' ti-due-late':''}">${fmtDate(t.due)}</span>`:''}
+        </div>`:''}
+      </div>
+      <div class="ti-actions">
+        <div class="edit-btn" data-action="todo-edit" data-id="${t.id}" title="Edit">✎</div>
+        <div class="del-btn" data-action="todo-del" data-id="${t.id}" title="Delete">✕</div>
+      </div>
+    </div>`;
+  }
+
+  function group(label,items,showDue=false,isOverdue=false){
+    if(!items.length)return'';
+    return`<div class="tg${isOverdue?' tg-overdue':''}">
+      <div class="tg-hd"><span class="tg-label">${label}</span><span class="tg-count${isOverdue?' tg-count-red':''}">${items.length}</span></div>
+      ${items.map(t=>renderTodoItem(t,showDue)).join('')}
+    </div>`;
+  }
+
+  return`<div class="pg-title">To-Do</div>
+  <div class="todo-qadd">
+    <input type="text" id="todo-new-input" class="todo-qinput" placeholder="New task… press Enter to save" maxlength="120">
+    <button class="todo-qadd-btn" data-action="todo-quick-add" aria-label="Add task">
+      <svg viewBox="0 0 16 16" fill="none" width="16" height="16"><line x1="8" y1="3" x2="8" y2="13" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/><line x1="3" y1="8" x2="13" y2="8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+    </button>
+  </div>
+  ${!pending.length&&!doneItems.length?`<div class="empty" style="padding-top:40px;"><div class="empty-e">✓</div><div class="empty-t">All clear!</div><div class="empty-s">Add a task above to get started.</div></div>`:''}
+  ${group('Overdue',overdue,true,true)}
+  ${group('Today',todayItems)}
+  ${group('Tomorrow',tomorrowItems)}
+  ${group('Upcoming',upcomingItems,true)}
+  ${group('No date',nodateItems)}
+  ${doneItems.length?`<div class="tg tg-done">
+    <div class="tg-hd"><span class="tg-label tg-label-faded">Completed</span><span class="tg-count tg-count-faded">${doneItems.length}</span></div>
+    ${doneItems.map(t=>renderTodoItem(t)).join('')}
+  </div>`:''}`;
+}
+
+function renderTodoEditModal(){
+  const{subjects=[]}=S.data;
+  const t=S._todoEdit||{};
+  return`<div class="overlay" data-action="close-modal-out">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="mhandle" data-action="close-modal"></div>
+        <div class="modal-close-x" data-action="close-modal">✕</div>
+        <div class="mtitle">Edit task</div>
+      </div>
+      <div class="modal-body">
+        <div class="m-lbl">Task</div>
+        <input type="text" id="todo-edit-text" class="team-input" value="${esc(t.text||'')}" maxlength="120" autofocus>
+        <div class="form-row" style="display:flex;gap:10px;margin-top:14px;">
+          <div style="flex:1;">
+            <div class="m-lbl">Due date <span style="font-weight:300;color:var(--tx3);">— optional</span></div>
+            <input type="date" id="todo-edit-due" class="team-input" value="${t.due||''}">
+          </div>
+          <div style="flex:1;">
+            <div class="m-lbl">Subject <span style="font-weight:300;color:var(--tx3);">— optional</span></div>
+            <select id="todo-edit-sub" class="team-input">
+              <option value="">— none —</option>
+              ${subjects.map(s=>`<option value="${s.id}"${t.subject===s.id?' selected':''}>${esc(s.name)}</option>`).join('')}
+            </select>
+          </div>
+        </div>
+        <button class="m-submit" data-action="todo-save-edit" style="margin-top:20px;">Save</button>
+      </div>
+    </div>
+  </div>`;
+}
+
+/* ════════════════════════════════
    SETTINGS VIEW
 ════════════════════════════════ */
 function renderSettings(){
@@ -3658,7 +4145,7 @@ function renderSettings(){
   </div>
   <div class="sset">
     <div class="sset-t">↕ Cloud sync</div>
-    <div class="jbi-inst"><ol><li>Go to <a href="https://jsonbin.io" target="_blank">jsonbin.io</a> → create free account</li><li>API Keys → copy your Master Key</li><li>Paste below → Save & push</li></ol><div style="margin-top:5px;color:var(--tx3);">On another device: same key → Pull from cloud.</div></div>
+    <div class="jbi-inst"><ol><li>Go to <a href="https://jsonbin.io" target="_blank">jsonbin.io</a> → create free account</li><li>API Keys → copy your Master Key</li><li>Paste below → Save & push</li></ol><div style="margin-top:5px;color:var(--tx3);">On another device: same key → Pull from cloud.</div>${S.googleUser?.uid?`<div style="margin-top:8px;padding:8px 10px;background:rgba(120,200,100,.08);border:1px solid rgba(120,200,100,.2);border-radius:6px;font-size:12px;color:var(--ok);">✓ Google sign-in linked — setting up sync here lets you auto-restore on any device by signing in with Google.</div>`:`<div style="margin-top:8px;font-size:12px;color:var(--tx3);">Tip: set this up + sign in with Google and Meridian can auto-restore your account on any new device.</div>`}</div>
     <div class="srow"><span class="srow-l">API Key</span><input type="password" id="sync-key" placeholder="$2a$10…" value="${sc.apiKey}" maxlength="80" style="font-family:'DM Mono',monospace;font-size:11px;color:var(--tx);border:none;background:transparent;outline:none;text-align:right;width:150px;cursor:text;"></div>
     ${sc.binId?`<div class="srow"><span class="srow-l">Bin ID</span><span class="srow-v">${sc.binId.slice(-10)}…</span></div>`:''}
     <div class="sync-row"><div class="syncd${sc.status==='ok'?' ok':sc.status==='err'?' err':sc.status==='syncing'?' ing':''}"></div><span>${sc.status==='ok'?`Last synced ${sc.lastSynced?new Date(sc.lastSynced).toLocaleTimeString('en-AU',{hour:'2-digit',minute:'2-digit'}):'—'}`:sc.status==='err'?'Sync error':'Not configured'}</span></div>
@@ -3750,6 +4237,7 @@ function renderLeaderboard(){
           <div class="lb-podium-avatar${isMe?' lb-podium-avatar-me':''}${i===1?' lb-podium-avatar-first':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-podium-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
           <div class="lb-podium-val">${fmtLbValShort(r,sortKey)}</div>
+          ${(()=>{const lastWeekRows2=rows.filter(x=>(x.lastWeekMins||0)>0);const lww=lastWeekRows2.length?lastWeekRows2.reduce((b,x)=>(x.lastWeekMins||0)>(b.lastWeekMins||0)?x:b,lastWeekRows2[0]):null;return lww&&r.userId===lww.userId?'<div class="lb-podium-lwbadge">🏆 last wk</div>':'';})()}
           <div class="lb-podium-bar" style="height:${heights[i]}px;background:${podiumBgs[i]};">
             <span class="lb-podium-medal">${medalEmojis[i]}</span>
             <span class="lb-podium-place">${places[i]}</span>
@@ -3807,10 +4295,22 @@ function renderLeaderboard(){
     // Activity indicator — who's been active recently
     const activeCount=rows.filter(r=>(r.weekMins||0)>0).length;
 
+    // Last week's champion — whoever has the highest lastWeekMins
+    const lastWeekRows=rows.filter(r=>(r.lastWeekMins||0)>0);
+    const lastWeekWinner=lastWeekRows.length?lastWeekRows.reduce((best,r)=>(r.lastWeekMins||0)>(best.lastWeekMins||0)?r:best,lastWeekRows[0]):null;
+    const lwBanner=lastWeekWinner?`<div class="lb-lastweek-banner">
+      <span class="lb-lastweek-crown">🏆</span>
+      <div class="lb-lastweek-body">
+        <div class="lb-lastweek-title">Last week's champion</div>
+        <div class="lb-lastweek-name">${esc(lastWeekWinner.name)}${lastWeekWinner.userId===myId?' <span class="lb-you">you</span>':''} · ${fmtDur(lastWeekWinner.lastWeekMins)}</div>
+      </div>
+    </div>`:'';
+
     return`
     <div class="lb-sort-bar">
       ${Object.keys(sortLabel).map(k=>`<div class="lb-sort-chip${sortKey===k?' on':''}" data-action="lb-sort" data-key="${k}"><span class="lb-sort-ic">${sortIcons[k]}</span>${sortLabel[k]}</div>`).join('')}
     </div>
+    ${lwBanner}
     <div class="lb-activity-bar">
       <span class="lb-activity-dot"></span>
       <span class="lb-activity-text">${activeCount} active this week · ${sorted.length} total</span>
@@ -3825,11 +4325,12 @@ function renderLeaderboard(){
         const isDupe=!isMe&&myName&&(r.name||'').trim().toLowerCase()===myName;
         const rank=i+4;
         const isActive=(r.weekMins||0)>0;
+        const isLwWinner=lastWeekWinner&&r.userId===lastWeekWinner.userId;
         return`<div class="lb-row${isMe?' lb-me':''}${!isActive?' lb-inactive':''}"${isMe?'':` data-action="lb-pick-rival" data-uid="${r.userId}"`}>
           <div class="lb-rank"><span class="lb-rank-num">${rank}</span></div>
           <div class="lb-avatar${isMe?' lb-avatar-me':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-info">
-            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you lb-dupe">dupe</span>':''}</div>
+            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you lb-dupe">dupe</span>':''}${isLwWinner?' <span class="lb-lw-badge">🏆 last wk</span>':''}</div>
             <div class="lb-sub">${secondaryInfo(r,sortKey)}</div>
           </div>
           <div class="lb-stat">
@@ -4235,6 +4736,8 @@ function renderModal(){
   if(S.modal==='logscore')return renderLogTestModal();
   if(S.modal==='team-create')return renderTeamCreateModal();
   if(S.modal==='team-join')return renderTeamJoinModal();
+  if(S.modal==='add-assess')return renderAddAssessModal();
+  if(S.modal==='todo-edit')return renderTodoEditModal();
   return'';
 }
 
@@ -4658,6 +5161,80 @@ const A={
   'nav-timetable':()=>{navTo('timetable');},
   'nav-history':()=>{navTo('history');},
   'nav-stats':()=>{navTo('stats');},
+  'nav-assess':()=>{navTo('assess');},
+  'nav-todo':()=>{navTo('todo');},
+
+  // ── Assessment tracker actions ──
+  'open-add-assess':()=>{S._assessEdit=null;S.modal='add-assess';document.body.classList.add('modal-open');render();},
+  'assess-edit':(btn)=>{
+    const a=(S.data.assessments||[]).find(x=>x.id===btn.dataset.id);
+    if(!a)return;
+    S._assessEdit={...a};S.modal='add-assess';document.body.classList.add('modal-open');render();
+  },
+  'save-assess':()=>{
+    const name=document.getElementById('assess-name')?.value?.trim();
+    const date=document.getElementById('assess-date')?.value;
+    if(!name||!date){showToast('Name and date are required.','!');return;}
+    const subject=document.getElementById('assess-sub')?.value||null;
+    const type=document.getElementById('assess-type')?.value||'Assessment';
+    const weightRaw=parseInt(document.getElementById('assess-weight')?.value||'');
+    const weight=isNaN(weightRaw)||weightRaw<1||weightRaw>100?null:weightRaw;
+    const notes=document.getElementById('assess-notes')?.value?.trim()||'';
+    if(!S.data.assessments)S.data.assessments=[];
+    if(S._assessEdit){
+      const idx=S.data.assessments.findIndex(x=>x.id===S._assessEdit.id);
+      if(idx>-1)S.data.assessments[idx]={...S.data.assessments[idx],name,date,subject,type,weight,notes};
+    } else {
+      S.data.assessments.push({id:uid(),name,date,subject,type,weight,notes,done:false,created:today()});
+    }
+    saveLocal(S.data);triggerSync();S.modal=null;S._assessEdit=null;document.body.classList.remove('modal-open');render();
+    showToast(S._assessEdit?'Assessment updated.':'Assessment added.','✓');
+  },
+  'assess-done':(btn)=>{
+    const a=(S.data.assessments||[]).find(x=>x.id===btn.dataset.id);
+    if(!a)return;
+    a.done=true;a.doneAt=Date.now();
+    saveLocal(S.data);triggerSync();S.modal=null;document.body.classList.remove('modal-open');render();showToast('Marked done!','✓');
+  },
+  'assess-del':(btn)=>{
+    if(!confirm('Delete this assessment?'))return;
+    S.data.assessments=(S.data.assessments||[]).filter(x=>x.id!==btn.dataset.id);
+    saveLocal(S.data);triggerSync();S.modal=null;document.body.classList.remove('modal-open');render();showToast('Deleted.','✓');
+  },
+
+  // ── To-Do actions ──
+  'todo-quick-add':()=>{
+    const input=document.getElementById('todo-new-input');
+    const text=input?.value?.trim();
+    if(!text)return;
+    if(!S.data.todos)S.data.todos=[];
+    S.data.todos.push({id:uid(),text,done:false,created:today(),due:null,subject:null});
+    saveLocal(S.data);triggerSync();input.value='';render();
+  },
+  'todo-toggle':(btn)=>{
+    const t=(S.data.todos||[]).find(x=>x.id===btn.dataset.id);
+    if(!t)return;
+    t.done=!t.done;if(t.done)t.doneAt=Date.now();else delete t.doneAt;
+    saveLocal(S.data);triggerSync();render();
+  },
+  'todo-edit':(btn)=>{
+    const t=(S.data.todos||[]).find(x=>x.id===btn.dataset.id);
+    if(!t)return;
+    S._todoEdit={...t};S.modal='todo-edit';document.body.classList.add('modal-open');render();
+  },
+  'todo-save-edit':()=>{
+    const text=document.getElementById('todo-edit-text')?.value?.trim();
+    if(!text)return;
+    const due=document.getElementById('todo-edit-due')?.value||null;
+    const subject=document.getElementById('todo-edit-sub')?.value||null;
+    const idx=(S.data.todos||[]).findIndex(x=>x.id===S._todoEdit?.id);
+    if(idx>-1){S.data.todos[idx]={...S.data.todos[idx],text,due:due||null,subject:subject||null};}
+    saveLocal(S.data);triggerSync();S.modal=null;S._todoEdit=null;document.body.classList.remove('modal-open');render();
+  },
+  'todo-del':(btn)=>{
+    S.data.todos=(S.data.todos||[]).filter(x=>x.id!==btn.dataset.id);
+    saveLocal(S.data);triggerSync();render();
+  },
   'skip-break':()=>{skipBreak();},
   'nav-timer':()=>{navTo('timer');},
   'nav-settings':()=>{navTo('settings');},
@@ -4922,7 +5499,7 @@ const A={
 
   // Auto-login actions
   'auto-login':()=>{
-    const d=loadLocal();
+    const d=migrateData(loadLocal());
     if(!d){render();return;}
     localStorage.setItem(AUTH_KEY,'1');
     S.data=d;S.view='dashboard';
@@ -5232,6 +5809,8 @@ const A={
     const r=await syncPush(S.data,sc);
     sc.status=r.ok?'ok':'err';sc.lastSynced=r.ok?Date.now():sc.lastSynced;if(r.binId)sc.binId=r.binId;
     saveSync(sc);render();showToast(r.ok?'Cloud sync enabled ✓':'Failed — check API key',r.ok?'✓':'!');
+    // Keep Firebase up to date so Google sign-in on other devices can restore this account
+    if(r.ok&&S.googleUser?.uid)saveUserData(S.googleUser.uid);
   },
   'pull-cloud':async()=>{
     const sc=loadSync();const key=document.getElementById('sync-key')?.value?.trim()||sc.apiKey;
@@ -5490,6 +6069,8 @@ function attach(){
   // Global keyboard shortcuts — on document so they always work
   document.addEventListener('keydown',e=>{
     const noInput=!['INPUT','TEXTAREA','SELECT'].includes(document.activeElement?.tagName);
+    // Enter in todo quick-add field
+    if(e.key==='Enter'&&document.activeElement?.id==='todo-new-input'){A['todo-quick-add']();return;}
     if(e.key==='l'&&!S.modal&&S.data&&noInput){A['open-log']();}
     if(e.key==='t'&&!S.modal&&S.data&&noInput){navTo('timer');return;}
     if(e.key==='d'&&!S.modal&&S.data&&noInput){navTo('dashboard');return;}
@@ -5584,22 +6165,50 @@ function attach(){
 }
 
 // Shared auth result handler (used by popup and redirect flows)
-window._meridianHandleAuthResult=function(result,provider='Google'){
+window._meridianHandleAuthResult=async function(result,provider='Google'){
   const user=result.user;
-  S.googleUser={name:user.displayName,email:user.email,photo:user.photoURL};
+  S.googleUser={name:user.displayName,email:user.email,photo:user.photoURL,uid:user.uid};
   if(S.loginMode==='register'&&!S.loginName){S.loginName=user.displayName?.split(' ')[0]||user.email?.split('@')[0]||'';}
-  const d=loadLocal();
+
+  const d=migrateData(loadLocal());
   if(d){
+    // ── Local data exists: sign in normally ──
     localStorage.setItem(AUTH_KEY,'1');
     S.data=d;S.view='dashboard';render();startLiveTick();
     showToast('Signed in with '+provider+'.','✓');
+    // In background: save to Firebase so this account is restorable on any device via Google
+    saveUserData(user.uid);
   } else {
-    // No local account — switch to register flow with name pre-filled
-    S.loginMode='register';
-    S.loginName=user.displayName?.split(' ')[0]||user.email?.split('@')[0]||'';
-    S.regStep=2; // skip name step since we got it from Google
-    showToast('Signed in with '+provider+'. Finish setup below.','✓');
-    render();
+    // ── No local data: try to restore from Firebase ──
+    S._authRestoring=true;render();
+    let restored=false;
+    try{
+      const record=await loadUserData(user.uid);
+      if(record?.data){
+        const restoredData=migrateData(record.data);
+        if(restoredData?.name){
+          // Restore the same leaderboard UID so the board entry is consistent across devices
+          if(record.lbUid)localStorage.setItem('mer_lb_uid',record.lbUid);
+          S.data=restoredData;
+          saveLocal(S.data);
+          localStorage.setItem(AUTH_KEY,'1');
+          S._authRestoring=false;
+          S.view='dashboard';render();startLiveTick();
+          showToast('Account restored — welcome back!','✓');
+          triggerLbPush();
+          restored=true;
+        }
+      }
+    }catch(e){console.warn('Auth restore failed:',e);}
+    if(!restored){
+      // No registry or pull failed — fall through to register flow
+      S._authRestoring=false;
+      S.loginMode='register';
+      S.loginName=user.displayName?.split(' ')[0]||user.email?.split('@')[0]||'';
+      S.regStep=2; // skip name step since we got it from Google
+      showToast('Signed in with '+provider+'. Complete setup below.','✓');
+      render();
+    }
   }
 };
 
