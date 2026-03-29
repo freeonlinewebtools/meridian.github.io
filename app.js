@@ -797,6 +797,7 @@ function buildLbStats(data){
     name:data.name||'Anonymous',
     totalMins:totalMins(sess),
     weekMins:weekMins(sess),
+    weekKey:weekMon(),
     lastWeekMins,
     streak:getStreak(sess),
     bestStreak:getBest(sess),
@@ -829,7 +830,15 @@ async function lbFetchAll(){
   const{collection,getDocs,query,orderBy}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
   try{
     const snap=await getDocs(query(collection(db,'leaderboard'),orderBy('totalMins','desc')));
-    const rows=[];snap.forEach(d=>rows.push({id:d.id,...d.data()}));return rows;
+    const currentWeekKey=weekMon();
+    const rows=[];
+    snap.forEach(d=>{
+      const row={id:d.id,...d.data()};
+      // Zero out weekMins for any record that wasn't pushed this week
+      if(row.weekKey!==currentWeekKey)row.weekMins=0;
+      rows.push(row);
+    });
+    return rows;
   }catch(e){console.warn('LB fetch failed:',e);showToast('Could not load leaderboard — check your connection.','!');return[];}
 }
 
@@ -1407,7 +1416,7 @@ let S={
   moreMenu:false,           // mobile "more" menu open
   // Leaderboard
   lbTab:0,                   // 0=rankings, 1=head-to-head, 2=teams
-  lbSort:'weekMins',         // weekMins, totalMins, streak, avgScore
+  lbSort:'totalMins',        // totalMins, weekMins, streak, avgScore
   lbData:null,               // cached leaderboard rows
   lbLoading:false,
   lbRival:null,              // selected rival userId for h2h
@@ -4187,13 +4196,14 @@ function renderLeaderboard(){
   const myId=getLbUserId();
   const rows=S.lbData||[];
   const sortKey=S.lbSort;
+  // Period: totalMins or weekMins. Streak/avgScore are secondary sort options
+  const isPeriodSort=sortKey==='totalMins'||sortKey==='weekMins';
+  const period=sortKey==='weekMins'?'week':'alltime'; // used for display logic
+
   const sorted=[...rows].sort((a,b)=>{
     if(sortKey==='avgScore')return(b.avgScore||0)-(a.avgScore||0);
     return(b[sortKey]||0)-(a[sortKey]||0);
   });
-
-  const sortLabel={weekMins:'This week',totalMins:'All-time',streak:'Streak',avgScore:'Test avg'};
-  const sortIcons={weekMins:'◷',totalMins:'∑',streak:'🔥',avgScore:'◈'};
 
   function fmtLbVal(row,key){
     if(key==='weekMins'||key==='totalMins')return fmtDur(row[key]||0);
@@ -4201,48 +4211,47 @@ function renderLeaderboard(){
     if(key==='avgScore')return row[key]!=null?row[key]+'%':'—';
     return row[key]||'—';
   }
-
   function fmtLbValShort(row,key){
     if(key==='weekMins'||key==='totalMins')return fmtDur(row[key]||0);
     if(key==='streak')return(row[key]||0)+'d';
     if(key==='avgScore')return row[key]!=null?row[key]+'%':'—';
     return row[key]||'—';
   }
-
   function secondaryInfo(r,key){
-    if(key==='weekMins') return`${r.streak||0} day streak · Yr ${r.year||'?'}`;
-    if(key==='totalMins') return`${r.sessCount||0} sessions · Yr ${r.year||'?'}`;
-    if(key==='streak') return`${fmtDur(r.weekMins||0)} this week`;
+    if(key==='weekMins') return`${fmtDur(r.totalMins||0)} all-time · ${r.streak||0}d streak`;
+    if(key==='totalMins') return`${r.sessCount||0} sessions · ${fmtDur(r.weekMins||0)} this wk`;
+    if(key==='streak') return`${fmtDur(r.weekMins||0)} this week · ${fmtDur(r.totalMins||0)} all-time`;
     if(key==='avgScore') return`${r.testCount||0} test${r.testCount===1?'':'s'} · Yr ${r.year||'?'}`;
     return`Yr ${r.year||'?'}`;
   }
 
-  function medal(i){return i===0?'🥇':i===1?'🥈':i===2?'🥉':'';}
+  // Last week winner (computed once)
+  const lastWeekRows=rows.filter(r=>(r.lastWeekMins||0)>0);
+  const lastWeekWinner=lastWeekRows.length?lastWeekRows.reduce((best,r)=>(r.lastWeekMins||0)>(best.lastWeekMins||0)?r:best,lastWeekRows[0]):null;
 
   // ── Podium for top 3 ──
   function renderPodium(){
     if(sorted.length<2)return'';
     const top3=sorted.slice(0,3);
-    // Reorder for podium: [2nd, 1st, 3rd]
     const podiumOrder=top3.length>=3?[top3[1],top3[0],top3[2]]:[top3[1]||null,top3[0],null];
-    const heights=[72,96,56];
+    const heights=[68,92,52];
     const places=[2,1,3];
     const medalEmojis=['🥈','🥇','🥉'];
-    const podiumBgs=['var(--srf2)','linear-gradient(180deg,rgba(192,90,48,.12),rgba(192,90,48,.04))','var(--srf2)'];
+    const isLwWinner=(r)=>lastWeekWinner&&r&&r.userId===lastWeekWinner.userId;
 
     return`<div class="lb-podium">
       ${podiumOrder.map((r,i)=>{
         if(!r)return`<div class="lb-podium-slot lb-podium-empty"></div>`;
         const isMe=r.userId===myId;
-        return`<div class="lb-podium-slot lb-podium-${places[i]}${isMe?' lb-podium-me':''}"${!isMe?` data-action="lb-pick-rival" data-uid="${r.userId}"`:''}">
-          ${i===1?'<div class="lb-podium-crown">👑</div>':''}
+        const place=places[i];
+        return`<div class="lb-podium-slot lb-podium-${place}${isMe?' lb-podium-me':''}"${!isMe?` data-action="lb-pick-rival" data-uid="${r.userId}"`:''}">
+          ${i===1?'<div class="lb-podium-crown">👑</div>':'<div style="height:26px"></div>'}
           <div class="lb-podium-avatar${isMe?' lb-podium-avatar-me':''}${i===1?' lb-podium-avatar-first':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-podium-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
           <div class="lb-podium-val">${fmtLbValShort(r,sortKey)}</div>
-          ${(()=>{const lastWeekRows2=rows.filter(x=>(x.lastWeekMins||0)>0);const lww=lastWeekRows2.length?lastWeekRows2.reduce((b,x)=>(x.lastWeekMins||0)>(b.lastWeekMins||0)?x:b,lastWeekRows2[0]):null;return lww&&r.userId===lww.userId?'<div class="lb-podium-lwbadge">◆ last wk</div>':'';})()}
-          <div class="lb-podium-bar" style="height:${heights[i]}px;background:${podiumBgs[i]};">
+          ${isLwWinner(r)?'<div class="lb-podium-lwbadge">◆ last wk</div>':''}
+          <div class="lb-podium-bar" style="height:${heights[i]}px;">
             <span class="lb-podium-medal">${medalEmojis[i]}</span>
-            <span class="lb-podium-place">${places[i]}</span>
           </div>
         </div>`;
       }).join('')}
@@ -4262,16 +4271,16 @@ function renderLeaderboard(){
       </div>
       <div class="lb-mystats-grid">
         <div class="lb-mystats-item">
+          <div class="lb-mystats-v">${fmtDur(me.totalMins||0)}</div>
+          <div class="lb-mystats-l">All-time</div>
+        </div>
+        <div class="lb-mystats-item">
           <div class="lb-mystats-v">${fmtDur(me.weekMins||0)}</div>
           <div class="lb-mystats-l">This week</div>
         </div>
         <div class="lb-mystats-item">
           <div class="lb-mystats-v">${me.streak||0}d</div>
           <div class="lb-mystats-l">Streak</div>
-        </div>
-        <div class="lb-mystats-item">
-          <div class="lb-mystats-v">${fmtDur(me.totalMins||0)}</div>
-          <div class="lb-mystats-l">All-time</div>
         </div>
         <div class="lb-mystats-item">
           <div class="lb-mystats-v">${me.avgScore!=null?me.avgScore+'%':'—'}</div>
@@ -4291,15 +4300,10 @@ function renderLeaderboard(){
       <div class="lb-empty-desc">Log a study session and you'll be the first!</div>
     </div>`;
 
-    const myRank=sorted.findIndex(r=>r.userId===myId);
+    const activeCount=rows.filter(r=>(r.weekMins||0)>0).length;
     const rest=sorted.slice(3);
 
-    // Activity indicator — who's been active recently
-    const activeCount=rows.filter(r=>(r.weekMins||0)>0).length;
-
-    // Last week's champion — whoever has the highest lastWeekMins
-    const lastWeekRows=rows.filter(r=>(r.lastWeekMins||0)>0);
-    const lastWeekWinner=lastWeekRows.length?lastWeekRows.reduce((best,r)=>(r.lastWeekMins||0)>(best.lastWeekMins||0)?r:best,lastWeekRows[0]):null;
+    // Last week champion banner
     const lwBanner=lastWeekWinner?`<div class="lb-lw-card">
       <div class="lb-lw-left">
         <div class="lb-lw-hrs">${fmtDur(lastWeekWinner.lastWeekMins)}</div>
@@ -4314,13 +4318,21 @@ function renderLeaderboard(){
     </div>`:'';
 
     return`
-    <div class="lb-sort-bar">
-      ${Object.keys(sortLabel).map(k=>`<div class="lb-sort-chip${sortKey===k?' on':''}" data-action="lb-sort" data-key="${k}"><span class="lb-sort-ic">${sortIcons[k]}</span>${sortLabel[k]}</div>`).join('')}
+    <div class="lb-period-toggle">
+      <div class="lb-period-btn${sortKey==='totalMins'?' on':''}" data-action="lb-sort" data-key="totalMins">All-time</div>
+      <div class="lb-period-btn${sortKey==='weekMins'?' on':''}" data-action="lb-sort" data-key="weekMins">This week</div>
+    </div>
+    <div class="lb-secondary-sort">
+      <span class="lb-secondary-label">Sort by</span>
+      <div class="lb-sec-chip${sortKey==='totalMins'||sortKey==='weekMins'?'':''}" style="display:flex;gap:5px;">
+        <div class="lb-sec-btn${sortKey==='streak'?' on':''}" data-action="lb-sort" data-key="streak">🔥 Streak</div>
+        <div class="lb-sec-btn${sortKey==='avgScore'?' on':''}" data-action="lb-sort" data-key="avgScore">◈ Test avg</div>
+      </div>
     </div>
     ${lwBanner}
     <div class="lb-activity-bar">
       <span class="lb-activity-dot"></span>
-      <span class="lb-activity-text">${activeCount} active this week · ${sorted.length} total</span>
+      <span>${activeCount} active this week · ${sorted.length} on board</span>
     </div>
     ${renderPodium()}
     ${renderMyStats()}
@@ -4332,18 +4344,18 @@ function renderLeaderboard(){
         const isDupe=!isMe&&myName&&(r.name||'').trim().toLowerCase()===myName;
         const rank=i+4;
         const isActive=(r.weekMins||0)>0;
-        const isLwWinner=lastWeekWinner&&r.userId===lastWeekWinner.userId;
+        const isLwW=lastWeekWinner&&r.userId===lastWeekWinner.userId;
         return`<div class="lb-row${isMe?' lb-me':''}${!isActive?' lb-inactive':''}"${isMe?'':` data-action="lb-pick-rival" data-uid="${r.userId}"`}>
           <div class="lb-rank"><span class="lb-rank-num">${rank}</span></div>
           <div class="lb-avatar${isMe?' lb-avatar-me':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-info">
-            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you lb-dupe">dupe</span>':''}${isLwWinner?' <span class="lb-lw-badge">◆ last wk</span>':''}</div>
+            <div class="lb-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}${isDupe?' <span class="lb-you lb-dupe">dupe</span>':''}${isLwW?' <span class="lb-lw-badge">◆ last wk</span>':''}</div>
             <div class="lb-sub">${secondaryInfo(r,sortKey)}</div>
           </div>
           <div class="lb-stat">
             <div class="lb-stat-val">${fmtLbVal(r,sortKey)}</div>
-            ${isDupe?`<div class="lb-del-dupe" data-action="lb-del-entry" data-uid="${r.userId}" title="Delete duplicate">✕</div>`:''}
-            ${!isMe&&!isDupe?'<div class="lb-challenge-sm">⚔️</div>':''}
+            ${isDupe?`<div class="lb-del-dupe" data-action="lb-del-entry" data-uid="${r.userId}">✕ dupe</div>`:''}
+            ${!isMe&&!isDupe?'<div class="lb-challenge-sm" title="Challenge">⚔️</div>':''}
           </div>
         </div>`;
       }).join('')}
