@@ -4899,13 +4899,11 @@ function renderProfileModal(){
   if(isMe){
     prof=S.data?.profile||{banner:'gradient-sunset',title:'',bio:''};
     name=S.data?.name||'You';
-    lbRow=(S.lbData||[]).find(r=>r.userId===myId);
+    lbRow=(S.lbData||[]).find(r=>r.userId===myId)||buildLbStats(S.data);
     badges=computeBadges(S.data||{});
-    if(lbRow){
-      const rank=(S.lbData||[]).findIndex(r=>r.userId===myId);
-      if(rank===0)badges=badges.includes('top1')?badges:[...badges,'top1'];
-      if(rank<=2)badges=badges.includes('top3')?badges:[...badges,'top3'];
-    }
+    const rank=(S.lbData||[]).findIndex(r=>r.userId===myId);
+    if(rank===0)badges=badges.includes('top1')?badges:[...badges,'top1'];
+    if(rank<=2&&rank>=0)badges=badges.includes('top3')?badges:[...badges,'top3'];
   } else {
     const cached=S.lbProfiles[userId]||{};
     lbRow=(S.lbData||[]).find(r=>r.userId===userId);
@@ -4935,10 +4933,10 @@ function renderProfileModal(){
             <div class="prof-modal-name">${esc(name)}${isMe?' <span class="lb-you">you</span>':''}</div>
             ${edit?`<input class="prof-title-inp" id="prof-title" placeholder="Add a title…" maxlength="40" value="${esc(prof.title||'')}">`:
               (prof.title?`<div class="prof-modal-title">${esc(prof.title)}</div>`:'')}
-            ${edit?`<input class="prof-bio-inp" id="prof-bio" placeholder="Short bio…" maxlength="80" value="${esc(prof.bio||'')}">`:
-              (prof.bio?`<div class="prof-modal-bio">${esc(prof.bio)}</div>`:'')}
-          </div>
+            ${edit?`<input class="prof-bio-inp" id="prof-bio" placeholder="Short bio…" maxlength="80" value="${esc(prof.bio||'')}">`:''}</div>
         </div>
+
+        ${!edit&&prof.bio?`<div class="prof-bio-block">${esc(prof.bio)}</div>`:''}
 
         ${lbRow?`<div class="prof-stats-row">
           <div class="prof-stat"><div class="prof-stat-v">${fmtDur(lbRow.totalMins||0)}</div><div class="prof-stat-l">Total</div></div>
