@@ -4922,13 +4922,13 @@ function renderProfileModal(){
     <div class="modal prof-modal" style="padding:0;overflow:hidden;">
       <div class="prof-modal-banner" style="background:${bannerCss};">
         <div class="prof-modal-banner-overlay"></div>
-        ${isMe?`<button class="prof-edit-banner-btn" data-action="toggle-profile-edit" title="Customise">${edit?'✓ Done':'✏ Edit'}</button>`:''}
-        <div class="mhandle" data-action="close-modal" style="margin:0 auto;width:36px;height:4px;background:rgba(255,255,255,.35);border-radius:2px;margin-top:10px;"></div>
+        <div class="mhandle" style="position:absolute;top:10px;left:50%;transform:translateX(-50%);width:36px;height:4px;background:rgba(255,255,255,.35);border-radius:2px;z-index:2;"></div>
+        ${isMe?`<button class="prof-edit-banner-btn" data-action="toggle-profile-edit" title="Customise">${edit?'✓ Done':'— Edit'}</button>`:''}
         <div class="prof-modal-close" data-action="close-modal">✕</div>
+        <div class="prof-modal-avatar" style="background:${bannerCss};">${esc(name[0]?.toUpperCase()||'?')}</div>
       </div>
       <div class="prof-modal-body">
         <div class="prof-modal-top">
-          <div class="prof-modal-avatar" style="background:${bannerCss};">${esc(name[0]?.toUpperCase()||'?')}</div>
           <div class="prof-modal-info">
             <div class="prof-modal-name">${esc(name)}${isMe?' <span class="lb-you">you</span>':''}</div>
             ${edit?`<input class="prof-title-inp" id="prof-title" placeholder="Add a title…" maxlength="40" value="${esc(prof.title||'')}">`:

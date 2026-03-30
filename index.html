@@ -38,7 +38,7 @@ window.PAPERS_DIR = './papers/';
 <script>
 window.pdfjsReady = false;
 window.pdfjsLib = null;
-import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs').then(m=>{
+  import('https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.mjs').then(m=>{
   window.pdfjsLib = m;
   window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.mjs';
   window.pdfjsReady = true;
