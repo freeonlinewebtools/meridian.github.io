@@ -256,9 +256,9 @@ function loadLocal(){try{const r=localStorage.getItem(KEY);if(!r)return null;con
 function saveLocal(d){try{localStorage.setItem(KEY,JSON.stringify(d));}catch(e){console.error('Save failed:',e);showToast('Storage full — data not saved! Export a backup now.','⚠');}}
 function loadSync(){try{const r=localStorage.getItem(SKEY);return r?JSON.parse(r):{apiKey:'',binId:'',lastSynced:null,status:'idle'};}catch{return{apiKey:'',binId:'',lastSynced:null,status:'idle'};}}
 // Patch missing fields for existing accounts loaded from storage
-function migrateData(d){if(!d)return d;if(!d.assessments)d.assessments=[];if(!d.todos)d.todos=[];return d;}
+function migrateData(d){if(!d)return d;if(!d.assessments)d.assessments=[];if(!d.todos)d.todos=[];if(!d.dailyGoalMins)d.dailyGoalMins=90;if(!d.subjectNotes)d.subjectNotes={};return d;}
 function saveSync(s){try{localStorage.setItem(SKEY,JSON.stringify(s));}catch(e){console.error('Sync save failed:',e);}}
-function newAccount(name,pin,year,subs){return{name:name.trim(),pin,joined:today(),year,subjects:subs||ALL_PRESET_SUBS.slice(0,7),sessions:[],tests:[],timetable:[],graceUsed:null,assessments:[],todos:[]};}
+function newAccount(name,pin,year,subs){return{name:name.trim(),pin,joined:today(),year,subjects:subs||ALL_PRESET_SUBS.slice(0,7),sessions:[],tests:[],timetable:[],graceUsed:null,assessments:[],todos:[],dailyGoalMins:90,subjectNotes:{}};}
 function exportCode(d){const s={n:d.name,p:d.pin,j:d.joined,y:d.year,subs:d.subjects,s:d.sessions,tests:d.tests||[],tt:d.timetable||[],g:d.graceUsed};const bytes=new TextEncoder().encode(JSON.stringify(s));let bin='';for(const b of bytes)bin+=String.fromCharCode(b);return btoa(bin);}
 function importCode(code){try{const bin=atob(code.trim());const bytes=new Uint8Array(bin.length);for(let i=0;i<bin.length;i++)bytes[i]=bin.charCodeAt(i);const s=JSON.parse(new TextDecoder().decode(bytes));return{name:s.n,pin:s.p,joined:s.j||today(),year:s.y||11,subjects:s.subs||DEFAULT_SUBS,sessions:s.s||[],tests:s.tests||[],timetable:s.tt||[],graceUsed:s.g||null};}catch{return null;}}
 
@@ -1835,6 +1835,42 @@ function renderOnboardComplete(){
 /* ════════════════════════════════
    SHELL
 ════════════════════════════════ */
+/* ════════════════════════════════
+   STUDY RECOMMENDATION
+════════════════════════════════ */
+function getStudyRecommendation(data){
+  const{subjects,sessions,tests}=data;
+  const todayStr=today();
+  if(!subjects||!subjects.length)return null;
+  const scored=subjects.map(sub=>{
+    let urgency=0,reason='';
+    const subSess=sessions.filter(s=>s.subject===sub.id&&s.subject!=='grace').sort((a,b)=>b.ts-a.ts);
+    const lastSess=subSess[0];
+    const daysSince=lastSess?Math.max(0,Math.round((Date.now()-lastSess.ts)/86400000)):999;
+    if(daysSince===0)urgency-=15;
+    else if(daysSince>=5){urgency+=40;reason=daysSince+'d since last session';}
+    else if(daysSince>=3){urgency+=22;reason=daysSince+'d since last session';}
+    else if(daysSince>=1)urgency+=8;
+    const upcoming=(tests||[]).filter(t=>t.subject===sub.id&&t.nextTestDate&&t.nextTestDate>todayStr).sort((a,b)=>a.nextTestDate.localeCompare(b.nextTestDate))[0];
+    if(upcoming){
+      const d=daysUntil(upcoming.nextTestDate);
+      if(d<=3){urgency+=55;reason=esc(upcoming.nextTestName||'Test')+' in '+d+'d';}
+      else if(d<=7){urgency+=32;if(!reason)reason=esc(upcoming.nextTestName||'Test')+' in '+d+'d';}
+      else if(d<=14)urgency+=15;
+    }
+    if(!sessions.some(s=>s.subject===sub.id&&s.date===todayStr))urgency+=8;
+    const recent5=subSess.slice(0,5);
+    const avgConf=recent5.length?recent5.reduce((a,s)=>a+(s.confidence||3),0)/recent5.length:3;
+    if(avgConf<2){urgency+=18;if(!reason)reason='Low confidence — needs work';}
+    else if(avgConf<2.5)urgency+=8;
+    return{sub,urgency,daysSince,reason,upcoming};
+  });
+  scored.sort((a,b)=>b.urgency-a.urgency);
+  const top=scored[0];
+  if(!top||top.urgency<=0)return null;
+  return top;
+}
+
 function renderShell(){
   const vs={dashboard:renderDash,timetable:renderTimetable,history:renderHistory,progress:renderProgress,stats:renderStats,papers:renderPapers,timer:renderTimer,settings:renderSettings,leaderboard:renderLeaderboard,assess:renderAssess,todo:renderTodo};
   const sc=loadSync();
@@ -2061,6 +2097,8 @@ function renderDash(){
 
   <div class="qa-strip">${qaItems.map(q=>`<div class="qa-btn ${q.cls}" data-action="${q.action}"><span class="qa-ico">${q.icon}</span><span class="qa-lbl">${q.label}</span></div>`).join('')}</div>
 
+  ${(()=>{const rec=getStudyRecommendation(S.data);if(!rec)return'';const c=getSubjColor(rec.sub);return`<div class="rec-card" data-action="quick-log" data-subject="${rec.sub.id}"><div class="rec-left"><div class="rec-badge">Study next</div><div class="rec-name">${esc(rec.sub.name)}</div><div class="rec-why">${rec.reason||'Good time to review'}</div></div><div class="rec-chip" style="background:${c.bg};color:${c.tx};border-color:${c.bd};">${esc(rec.sub.abbr)}</div></div>`;})()}
+
   ${renderNowNext()}
 
   ${dashDayProg}
@@ -2125,6 +2163,8 @@ function renderDash(){
     </div>
   </div>
 
+  ${(()=>{const goal=S.data.dailyGoalMins||90;const pct=Math.min(100,Math.round((tMins/goal)*100));const isDone=tMins>=goal;return`<div class="goal-row"><span class="goal-row-label">Daily goal</span><div class="goal-track"><div class="goal-fill${isDone?' done':''}" data-bw="${pct}" style="width:0%"></div></div><span class="goal-pct${isDone?' done':''}">${isDone?'✓ Done':pct+'%'}</span></div>`;})()}
+
   ${hasTT&&todayTT.length?`
   <div class="sec mb8"><span class="sec-lbl">Today's classes</span><span class="sec-link" data-action="nav-timetable">Full schedule →</span></div>
   <div class="schedule-strip mb16">
@@ -2155,7 +2195,10 @@ function renderDash(){
     <div class="cov-dots">${subjects.map(sub=>{
       const isDone=done.some(d=>d.id===sub.id);
       const c=getSubjColor(sub);
-      return`<div class="cov-sub-dot${isDone?' done':''}" title="${sub.name}${isDone?' ✓':''}" data-action="quick-log" data-subject="${sub.id}" style="--dot-bg:${c.bg};--dot-bd:${c.bd};--dot-tx:${c.tx};${isDone?'--dot-fill:var(--ok);':''}"><span class="cov-sub-abbr">${sub.abbr}</span></div>`;
+      const lastSubSess=sessions.filter(s=>s.subject===sub.id&&s.subject!=='grace').sort((a,b)=>b.ts-a.ts)[0];
+      const daysSince=lastSubSess?Math.max(0,Math.round((Date.now()-lastSubSess.ts)/86400000)):null;
+      const neglected=!isDone&&daysSince!==null&&daysSince>=3;
+      return`<div class="cov-sub-dot${isDone?' done':''}${neglected?' neglected':''}" title="${esc(sub.name)}${isDone?' ✓':daysSince!==null?' · '+daysSince+'d ago':''}" data-action="quick-log" data-subject="${sub.id}" style="--dot-bg:${c.bg};--dot-bd:${c.bd};--dot-tx:${c.tx};${isDone?'--dot-fill:var(--ok);':''}"><span class="cov-sub-abbr">${sub.abbr}</span>${neglected?`<span class="cov-days-badge">${daysSince}d</span>`:''}</div>`;
     }).join('')}</div>
   </div>
 
@@ -3046,8 +3089,13 @@ function renderProgress(){
     <button class="log-submit" data-action="open-log-test">＋ Log Test Score</button>`;
   }
 
-  const content=[renderConfidenceTab,renderScoresTab,renderTopicsTab,renderMomentumTab][S.progTab]?.();
-  const progTabs=[{label:'Confidence',icon:'◈'},{label:'Scores',icon:'◉'},{label:'Topics',icon:'▦'},{label:'Momentum',icon:'↗'}];
+  function renderNotesTab(){
+    const notes=S.data.subjectNotes||{};
+    if(!subjects.length)return`<div class="empty"><div class="empty-e">📝</div><div class="empty-t">No subjects yet</div><div class="empty-s">Add subjects in Settings to start taking notes.</div></div>`;
+    return`<div class="notes-tab">${subjects.map(sub=>{const c=getSubjColor(sub);return`<div class="note-card card"><div class="note-header"><div class="note-abbr" style="background:${c.bg};color:${c.tx};border:1px solid ${c.bd};">${esc(sub.abbr)}</div><div class="note-subj">${esc(sub.name)}</div></div><textarea class="note-area" data-subid="${esc(sub.id)}" placeholder="Key formulas, quotes, definitions…">${esc(notes[sub.id]||'')}</textarea><div class="note-save-hint">Auto-saved as you type</div></div>`;}).join('')}</div>`;
+  }
+  const content=[renderConfidenceTab,renderScoresTab,renderTopicsTab,renderMomentumTab,renderNotesTab][S.progTab]?.();
+  const progTabs=[{label:'Confidence',icon:'◈'},{label:'Scores',icon:'◉'},{label:'Topics',icon:'▦'},{label:'Momentum',icon:'↗'},{label:'Notes',icon:'✎'}];
 
   // Quick summary stats
   const totalStudied=totalMins(sessions);
@@ -4106,6 +4154,7 @@ function renderSettings(){
     </div>
     <div class="srow"><span class="srow-l">Dark mode</span><div class="toggle${S.darkMode?' on':''}" data-action="toggle-dark"><div class="toggle-knob"></div></div></div>
     <div class="srow"><span class="srow-l">Streak reminders</span><div class="toggle${'Notification' in window&&Notification.permission==='granted'?' on':''}" data-action="toggle-notif"><div class="toggle-knob"></div></div></div>
+    <div class="srow"><span class="srow-l">Daily study goal</span><div style="display:flex;align-items:center;gap:6px;"><input type="number" id="sdailygoal" min="15" max="480" step="15" value="${S.data.dailyGoalMins||90}" style="font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);border:none;background:transparent;outline:none;text-align:right;width:50px;cursor:text;"><span style="font-size:12px;color:var(--tx3);">min/day</span></div></div>
     <button class="m-submit" style="font-size:13.5px;padding:11px;" data-action="save-account">Save changes →</button>
   </div>
 
@@ -5788,7 +5837,8 @@ const A={
       if(pin.length!==4||!/^\d{4}$/.test(pin)){showToast('PIN must be 4 digits','!');return;}
       S.data.pin=pin;
     }
-    S.data.name=name;S.data.year=year;saveLocal(S.data);triggerSync();triggerLbPush();render();showToast('Settings saved.','✓');
+    const dailyGoal=parseInt(document.getElementById('sdailygoal')?.value||'90');
+    S.data.name=name;S.data.year=year;if(dailyGoal>=15&&dailyGoal<=480)S.data.dailyGoalMins=dailyGoal;saveLocal(S.data);triggerSync();triggerLbPush();render();showToast('Settings saved.','✓');
   },
 
   'open-add-subj':()=>{S.modal='addsubj';S.newName='';S.newAbbr='';S.newTarget=60;S.logErr='';document.body.classList.add('modal-open');render();},
@@ -6028,6 +6078,7 @@ function attach(){
       updateLogSubmitText();
     }
     if(e.target.id==='log-note')S.logNote=e.target.value;
+    if(e.target.classList.contains('note-area')){const sid=e.target.dataset.subid;if(sid){if(!S.data.subjectNotes)S.data.subjectNotes={};S.data.subjectNotes[sid]=e.target.value;clearTimeout(window._noteSaveTm);window._noteSaveTm=setTimeout(()=>{saveLocal(S.data);},600);}}
     if(e.target.id==='log-date')S.logDate=e.target.value;
     if(e.target.id==='li-pin')S.loginPin=e.target.value;
     if(e.target.id==='import-code'){S.importCode=e.target.value;}
