@@ -4196,7 +4196,8 @@ function renderLeaderboard(){
   const myId=getLbUserId();
   const rows=S.lbData||[];
   const sortKey=S.lbSort;
-  // Period: totalMins or weekMins. Streak/avgScore are secondary sort options
+  const sortLabel={totalMins:'All-time',weekMins:'This week',streak:'Streak',avgScore:'Test avg'};
+  const sortIcons={totalMins:'∑',weekMins:'◷',streak:'🔥',avgScore:'◈'};
   const isPeriodSort=sortKey==='totalMins'||sortKey==='weekMins';
   const period=sortKey==='weekMins'?'week':'alltime'; // used for display logic
 
@@ -4318,16 +4319,8 @@ function renderLeaderboard(){
     </div>`:'';
 
     return`
-    <div class="lb-period-toggle">
-      <div class="lb-period-btn${sortKey==='totalMins'?' on':''}" data-action="lb-sort" data-key="totalMins">All-time</div>
-      <div class="lb-period-btn${sortKey==='weekMins'?' on':''}" data-action="lb-sort" data-key="weekMins">This week</div>
-    </div>
-    <div class="lb-secondary-sort">
-      <span class="lb-secondary-label">Sort by</span>
-      <div class="lb-sec-chip${sortKey==='totalMins'||sortKey==='weekMins'?'':''}" style="display:flex;gap:5px;">
-        <div class="lb-sec-btn${sortKey==='streak'?' on':''}" data-action="lb-sort" data-key="streak">🔥 Streak</div>
-        <div class="lb-sec-btn${sortKey==='avgScore'?' on':''}" data-action="lb-sort" data-key="avgScore">◈ Test avg</div>
-      </div>
+    <div class="lb-sort-bar">
+      ${Object.keys(sortLabel).map(k=>`<div class="lb-sort-chip${sortKey===k?' on':''}" data-action="lb-sort" data-key="${k}"><span class="lb-sort-ic">${sortIcons[k]}</span>${sortLabel[k]}</div>`).join('')}
     </div>
     ${lwBanner}
     <div class="lb-activity-bar">
