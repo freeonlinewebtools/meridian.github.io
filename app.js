@@ -4,6 +4,13 @@
 const KEY='mer_v4', SKEY='mer_sync', AUTH_KEY='mer_authed';
 const IS_LOCAL = location.hostname==='localhost'||location.hostname==='127.0.0.1'||location.hostname==='0.0.0.0'||location.protocol==='file:';
 
+// ── Anti-cheat & admin settings ──
+const ADMIN_NAMES=['Local'];               // Leaderboard admin — can delete any entry
+const NAME_WHITELIST=['Ethan','Ames','Benchmark','Caleb','Tsuyoshi','harper','lachlan','Methu','Lucy','if your above me your gay','Gilbert','pav','If ur above me ur a bum','samson','Sam','Tilly','Justin','Tri','jasmine','Gavin','Local','🪲','Siera','Kobi','Isaac','holly','Holiday','Jett','Jeffrey E','Adam','tom','Amelie','hannah','Tim','Justin Poo']; // If non-empty, only these names can register
+const MAX_SESSION_MINS=480;                      // Max minutes per single logged session (8 h)
+const MAX_DAILY_MINS=720;                        // Max total minutes logged per calendar day (12 h)
+const MAX_BACKDATE_DAYS=14;                      // Max days in the past a session can be backdated
+
 // Subject modules — per subject code, each module has inquiry questions
 const SUBJECT_MODULES = {
   '11PHY6': [
@@ -771,6 +778,7 @@ function getLbUserId(){
   if(!id){id=uid();localStorage.setItem('mer_lb_uid',id);}
   return id;
 }
+function isAdmin(){return ADMIN_NAMES.some(n=>n.toLowerCase()===(S.data?.name||'').trim().toLowerCase());}
 
 // ── Firebase user data sync ──
 // Stores full S.data in Firestore `users/{googleUid}`. Enables cross-device restore without JSONBin.
@@ -856,6 +864,12 @@ async function lbPush(){
   const db=await getFirestoreDb();if(!db)return;
   const{doc,setDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
   const stats=buildLbStats(S.data);if(!stats)return;
+  // Sanity check: block pushes where totalMins exceeds the realistic maximum for account age
+  const _joinDate=S.data.joined||today();
+  const _daysSinceJoin=Math.max(1,Math.round((Date.now()-new Date(_joinDate+'T12:00:00').getTime())/(1000*60*60*24)));
+  if(stats.totalMins>_daysSinceJoin*MAX_DAILY_MINS){console.warn('LB push blocked: totalMins exceeds realistic maximum.');return;}
+  // Sanity check: streak can't exceed account age
+  if(stats.streak>_daysSinceJoin+1){console.warn('LB push blocked: streak exceeds account age.');return;}
   const userId=getLbUserId();
   const prof=S.data?.profile||{};const myBadges=computeBadges(S.data||{});try{await setDoc(doc(db,'leaderboard',userId),{...stats,userId,banner:prof.banner||'gradient-sunset',title:prof.title||'',bio:prof.bio||'',badges:myBadges});}catch(e){console.warn('LB push failed:',e);showToast('Leaderboard update failed — check your connection.','!');}
 }
@@ -4390,11 +4404,12 @@ function renderLeaderboard(){
         if(!r)return`<div class="lb-podium-slot lb-podium-empty"></div>`;
         const isMe=r.userId===myId;
         const place=places[i];
-        return`<div class="lb-podium-slot lb-podium-${place}${isMe?' lb-podium-me':''}"${!isMe?` data-action="lb-pick-rival" data-uid="${r.userId}"`:''}">
+        return`<div class="lb-podium-slot lb-podium-${place}${isMe?' lb-podium-me':''}"${!isMe&&!isAdmin()?` data-action="lb-pick-rival" data-uid="${r.userId}"`:''}">
           ${i===1?'<div class="lb-podium-crown">👑</div>':'<div style="height:26px"></div>'}
           <div class="lb-podium-avatar${isMe?' lb-podium-avatar-me':''}${i===1?' lb-podium-avatar-first':''}">${esc((r.name||'?')[0].toUpperCase())}</div>
           <div class="lb-podium-name">${esc(r.name)}${isMe?' <span class="lb-you">you</span>':''}</div>
           <div class="lb-podium-val">${fmtLbValShort(r,sortKey)}</div>
+          ${isAdmin()&&!isMe?`<div class="lb-del-dupe" data-action="lb-del-entry" data-uid="${r.userId}" style="font-size:10px;margin:2px auto;">✕ remove</div>`:''}
           ${isLwWinner(r)?'<div class="lb-podium-lwbadge">◆ last wk</div>':''}
           <div class="lb-podium-bar" style="height:${heights[i]}px;">
             <span class="lb-podium-medal">${medalEmojis[i]}</span>
@@ -4495,7 +4510,8 @@ function renderLeaderboard(){
           <div class="lb-stat">
             <div class="lb-stat-val">${fmtLbVal(r,sortKey)}</div>
             ${isDupe?`<div class="lb-del-dupe" data-action="lb-del-entry" data-uid="${r.userId}">✕ dupe</div>`:''}
-            ${!isMe&&!isDupe?'<div class="lb-view-profile" title="View profile" style="font-size:13px;color:var(--tx3);">→</div>':''}
+            ${isAdmin()&&!isMe&&!isDupe?`<div class="lb-del-dupe" data-action="lb-del-entry" data-uid="${r.userId}">✕ remove</div>`:''}
+            ${!isMe&&!isDupe&&!isAdmin()?'<div class="lb-view-profile" title="View profile" style="font-size:13px;color:var(--tx3);">→</div>':''}
           </div>
         </div>`;
       }).join('')}
@@ -5312,6 +5328,7 @@ const A={
     if(step===1){
       const name=document.getElementById('reg-name')?.value?.trim();
       if(!name||name.length<1){S.loginErr='Enter your name.';render();return;}
+      if(NAME_WHITELIST.length>0&&!NAME_WHITELIST.some(n=>n.toLowerCase()===name.toLowerCase())){S.loginErr='This name isn\'t on the approved list. Contact the site owner to be added.';render();return;}
       S.loginName=name;S.regStep=2;render();
       // Auto-focus first pin digit
       setTimeout(()=>document.getElementById('pd-0')?.focus(),80);
@@ -5522,13 +5539,16 @@ const A={
   },
   'lb-del-entry':async(btn)=>{
     const uid=btn.dataset.uid;if(!uid)return;
-    if(!confirm('Delete this duplicate entry from the leaderboard?'))return;
+    const entry=(S.lbData||[]).find(r=>r.userId===uid);
+    const label=entry?.name?`"${entry.name}"`:'this entry';
+    const confirmMsg=isAdmin()?`Remove ${label} from the leaderboard?`:'Delete this duplicate entry from the leaderboard?';
+    if(!confirm(confirmMsg))return;
     try{
       const db=await getFirestoreDb();if(!db)return;
       const{doc,deleteDoc}=await import('https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js');
       await deleteDoc(doc(db,'leaderboard',uid));
       S.lbData=(S.lbData||[]).filter(r=>r.userId!==uid);
-      render();showToast('Duplicate removed','✕');
+      render();showToast(isAdmin()?`Removed ${label}.`:'Duplicate removed','✕');
     }catch(e){showToast('Failed to delete','!');}
   },
 
@@ -5703,6 +5723,14 @@ const A={
     const cust=document.getElementById('cust-dur')?.value;
     const dur=cust&&parseInt(cust)>0?parseInt(cust):S.logDur;
     const logDate=document.getElementById('log-date')?.value||today();
+    // ── Anti-cheat validation ──
+    if(dur>MAX_SESSION_MINS){showToast(`Max session length is ${MAX_SESSION_MINS} min (${MAX_SESSION_MINS/60}h).`,'!');return;}
+    if(dur<1){showToast('Session must be at least 1 minute.','!');return;}
+    const _logDayMs=new Date(logDate+'T12:00:00').getTime();
+    const _todayMs=new Date(today()+'T12:00:00').getTime();
+    const _daysDiff=Math.round((_todayMs-_logDayMs)/(1000*60*60*24));
+    if(_daysDiff<0){showToast('Can\'t log sessions in the future.','!');return;}
+    if(_daysDiff>MAX_BACKDATE_DAYS){showToast(`Can't backdate more than ${MAX_BACKDATE_DAYS} days.`,'!');return;}
     if(S.editSessId){
       // Update existing session
       const idx=S.data.sessions.findIndex(x=>x.id===S.editSessId);
@@ -5714,6 +5742,8 @@ const A={
       render();showToast('Session updated.','✓');
       return;
     }
+    const _existingDayMins=(S.data.sessions||[]).filter(s=>s.date===logDate&&s.subject!=='grace').reduce((a,s)=>a+s.duration,0);
+    if(_existingDayMins+dur>MAX_DAILY_MINS){showToast(`Daily limit is ${fmtDur(MAX_DAILY_MINS)}. You've already logged ${fmtDur(_existingDayMins)} on this day.`,'!');return;}
     const sess={id:uid(),date:logDate,subject:S.logSub,duration:dur,confidence:S.logConf,note,module:S.logModule||null,topic:S.logTopic||null,ts:Date.now()};
     S.data.sessions.push(sess);saveLocal(S.data);triggerSync();triggerLbPush();
     S.modal=null;S.logModule=null;S.logTopic=null;S.editSessId=null;document.body.classList.remove('modal-open');
@@ -6014,6 +6044,7 @@ const A={
     const year=parseInt(document.getElementById('syear')?.value||'11');
     const pin=document.getElementById('spin')?.value?.trim();
     if(!name)return;
+    if(NAME_WHITELIST.length>0&&name!==S.data.name&&!NAME_WHITELIST.some(n=>n.toLowerCase()===name.toLowerCase())&&!ADMIN_NAMES.some(n=>n.toLowerCase()===name.toLowerCase())){showToast('That name isn\'t on the approved list.','!');return;}
     if(pin!==undefined&&pin!==''){
       if(pin.length!==4||!/^\d{4}$/.test(pin)){showToast('PIN must be 4 digits','!');return;}
       S.data.pin=pin;
