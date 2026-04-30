@@ -2,7 +2,9 @@
   "permissions": {
     "allow": [
       "WebSearch",
-      "Bash(wc -l /c/Users/grrrp/OneDrive/Documents/Meridian/*.js /c/Users/grrrp/OneDrive/Documents/Meridian/*.css)"
+      "Bash(wc -l /c/Users/grrrp/OneDrive/Documents/Meridian/*.js /c/Users/grrrp/OneDrive/Documents/Meridian/*.css)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:api.github.com)"
     ]
   }
 }

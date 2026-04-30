@@ -466,6 +466,88 @@ function getVariableReward(){
 }
 
 /* ════════════════════════════════
+   V2 HELPERS
+════════════════════════════════ */
+function getHSCBand(pct){
+  if(pct>=90)return{band:6,label:'Band 6',cls:'b6'};
+  if(pct>=80)return{band:5,label:'Band 5',cls:'b5'};
+  if(pct>=70)return{band:4,label:'Band 4',cls:'b4'};
+  if(pct>=60)return{band:3,label:'Band 3',cls:'b3'};
+  if(pct>=50)return{band:2,label:'Band 2',cls:'b2'};
+  return{band:1,label:'Band 1',cls:'b1'};
+}
+
+function getMilestones(sessions,tests,subjects){
+  const real=sessions.filter(s=>s.subject!=='grace');
+  const totalH=totalMins(sessions)/60;
+  const sessCount=real.length;
+  const bestStreak=getBest(sessions);
+  const testCount=(tests||[]).length;
+  const topicCount=new Set(real.filter(s=>s.topic).map(s=>s.topic)).size;
+  const subjectsTouched=new Set(real.map(s=>s.subject)).size;
+  const daysActive=new Set(real.map(s=>s.date)).size;
+  const prevEarned=JSON.parse(localStorage.getItem('mer_milestones_earned')||'[]');
+  const milestones=[
+    {id:'first-session',label:'First session',icon:'◷',earned:sessCount>=1},
+    {id:'hours-10',label:'10 hours',icon:'◈',earned:totalH>=10},
+    {id:'hours-50',label:'50 hours',icon:'◉',earned:totalH>=50},
+    {id:'hours-100',label:'100 hours',icon:'★',earned:totalH>=100},
+    {id:'week-streak',label:'7-day streak',icon:'🔥',earned:bestStreak>=7},
+    {id:'fortnight',label:'14-day streak',icon:'⚡',earned:bestStreak>=14},
+    {id:'month-streak',label:'30-day streak',icon:'🏆',earned:bestStreak>=30},
+    {id:'first-test',label:'First test',icon:'◧',earned:testCount>=1},
+    {id:'tests-5',label:'5 tests logged',icon:'◫',earned:testCount>=5},
+    {id:'topics-10',label:'10 topics',icon:'▦',earned:topicCount>=10},
+    {id:'all-subjects',label:'All subjects',icon:'◇',earned:subjectsTouched>=subjects.length&&subjects.length>0},
+    {id:'days-30',label:'30 active days',icon:'◔',earned:daysActive>=30},
+  ];
+  // Mark newly earned (not in previous saved list)
+  const nowEarned=milestones.filter(m=>m.earned).map(m=>m.id);
+  milestones.forEach(m=>{if(m.earned&&!prevEarned.includes(m.id))m.isNew=true;});
+  localStorage.setItem('mer_milestones_earned',JSON.stringify(nowEarned));
+  return milestones;
+}
+
+function getPeakHour(sessions){
+  const real=sessions.filter(s=>s.subject!=='grace'&&s.ts);
+  if(real.length<5)return null;
+  const buckets=new Array(24).fill(0);
+  real.forEach(s=>{const h=new Date(s.ts).getHours();buckets[h]+=s.duration;});
+  const peak=buckets.indexOf(Math.max(...buckets));
+  const label=peak<12?`${peak||12}${peak<12?'am':'pm'}`:`${peak===12?12:peak-12}pm`;
+  return{hour:peak,label};
+}
+
+const ACCENT_PRESETS={
+  orange:{acc:'#C05A30',accD:'#9C4726',accL:'#F5E8DF',rgb:'192,90,48'},
+  teal:  {acc:'#2A8F7E',accD:'#1E6B5E',accL:'#DFF4F0',rgb:'42,143,126'},
+  purple:{acc:'#7B4FA6',accD:'#603A80',accL:'#EDE4F5',rgb:'123,79,166'},
+  red:   {acc:'#B83228',accD:'#9A2820',accL:'#F8E2DF',rgb:'184,50,40'},
+  blue:  {acc:'#2E5EA6',accD:'#1E4880',accL:'#DDE8F5',rgb:'46,94,166'},
+  green: {acc:'#2E7A4A',accD:'#1E5E38',accL:'#DDF5E4',rgb:'46,122,74'},
+};
+
+function applyAccent(key){
+  const p=ACCENT_PRESETS[key]||ACCENT_PRESETS.orange;
+  const r=document.documentElement.style;
+  r.setProperty('--acc',p.acc);
+  r.setProperty('--accD',p.accD);
+  r.setProperty('--accL',p.accL);
+  r.setProperty('--acc-rgb',p.rgb);
+}
+
+function loadAccent(){
+  const k=localStorage.getItem('mer_accent')||'orange';
+  if(k!=='orange')applyAccent(k);
+  return k;
+}
+
+function saveAccent(key){
+  localStorage.setItem('mer_accent',key);
+  applyAccent(key);
+}
+
+/* ════════════════════════════════
    SCORE PREDICTION ENGINE
 ════════════════════════════════ */
 function getSubjectTests(tests,subId){return(tests||[]).filter(t=>t.subject===subId).sort((a,b)=>a.date.localeCompare(b.date));}
@@ -503,6 +585,21 @@ function predictNextScore(data,subId,daysUntilTest){
   const last28Sess=subSess.filter(s=>s.date>=cutoff28);
   const cramRatio=last28Sess.length>3?last7Sess.length/last28Sess.length:0;
   const cramPenalty=cramRatio>0.6?-(cramRatio-0.6)*8:0; // up to -3.2 pts
+
+  // ── Study consistency: regularity of sessions across 28d ──
+  const studyDays28=new Set(last28Sess.map(s=>s.date)).size;
+  const regularityScore=Math.min(1,studyDays28/20); // 20+ distinct days = max
+  const consistencyFactor=0.98+regularityScore*0.04; // 0.98 to 1.02
+
+  // ── Session quality: duration-weighted confidence (decay-adjusted) ──
+  let qualNum=0,qualDen=0;
+  subSess.forEach(s=>{
+    const age=Math.max(0,(new Date(todayStr)-new Date(s.date+('T12:00:00')))/86400000);
+    const decay=Math.exp(-age/14);
+    if(s.confidence>0){qualNum+=s.duration*s.confidence*decay;qualDen+=s.duration*decay;}
+  });
+  const qualScore=qualDen>0?qualNum/qualDen:2.5;
+  const qualFactor=0.97+(qualScore/5)*0.06; // 0.97 to 1.03
 
   // ── Session efficiency: confidence per hour (decay-weighted) ──
   // Ebbinghaus-style: sessions decay with half-life ~21 days
@@ -561,7 +658,7 @@ function predictNextScore(data,subId,daysUntilTest){
     const studySignal=avgHrs2wk>0?Math.min(1.1,1+(Math.log(1+recentHrs/Math.max(avgHrs2wk,1))*0.05)):1;
     // Confidence signal (raw, not trend — no history to trend against)
     const confSignal=decayedAvgConf>0?0.9+(decayedAvgConf/5)*0.2:1;
-    let pred=baseline*studySignal*confSignal*topicFactor*timeFactor;
+    let pred=baseline*studySignal*confSignal*topicFactor*timeFactor*consistencyFactor*qualFactor;
     pred=Math.min(88/diff*1.1,Math.max(20,pred+cramPenalty));
     const point=Math.round(pred);
     // Wide CI for cold start
@@ -572,11 +669,12 @@ function predictNextScore(data,subId,daysUntilTest){
     const factors=[
       {label:'Estimated baseline', value:Math.round(baseline)+'%', icon:'📊'},
       {label:'Study intensity', value:studyFactor>=1?`+${Math.round((studyFactor-1)*100)}%`:`${Math.round((studyFactor-1)*100)}%`, icon:'⏱', positive:studyFactor>=1},
-      {label:'Session confidence', value:decayedAvgConf.toFixed(1)+'/5', icon:'💪', positive:decayedAvgConf>=3},
+      {label:'Session quality', value:qualScore.toFixed(1)+'/5', icon:'💪', positive:qualScore>=3},
+      {label:'Study consistency', value:studyDays28+'d in 28', icon:'📅', positive:studyDays28>=10},
       {label:'Topic coverage', value:Math.round(coverage*100)+'%', icon:'📚', positive:coverage>0.4},
       {label:'Subject difficulty', value:diff>=1.2?'Hard':diff>=1.05?'Challenging':'Standard', icon:'⚡', positive:false},
     ];
-    return{point,lo,hi,base:baseline,studyFactor,confFactor:confSignal,topicFactor,timeFactor,coverage,factors,days,coldStart:true,diff};
+    return{point,lo,hi,base:baseline,studyFactor,confFactor:confSignal,topicFactor,timeFactor,consistencyFactor,qualFactor,coverage,studyDays28,cramRatio,factors,days,coldStart:true,diff};
   }
 
   // ── NORMAL PATH: has test history ──
@@ -615,7 +713,7 @@ function predictNextScore(data,subId,daysUntilTest){
   const regressed=base*(1-shrinkage)+50*shrinkage;
 
   // ── Compose prediction ──
-  let pred=regressed*studyFactor*confFactor*topicFactor*timeFactor*vrBoost+scoreTrend+cramPenalty;
+  let pred=regressed*studyFactor*confFactor*topicFactor*timeFactor*vrBoost*consistencyFactor*qualFactor+scoreTrend+cramPenalty;
 
   // Cap scaled to difficulty — harder subjects have lower realistic ceilings
   const hardCap=Math.min(96,Math.round(94/Math.pow(diff,0.5)));
@@ -636,12 +734,14 @@ function predictNextScore(data,subId,daysUntilTest){
     {label:'Base (test history)', value:Math.round(base)+'%', icon:'📝'},
     {label:'Study intensity', value:studyFactor>=1?`+${Math.round((studyFactor-1)*100*base/100)}%`:`${Math.round((studyFactor-1)*100*base/100)}%`, icon:'⏱', positive:studyFactor>=1},
     {label:'Confidence trend', value:confFactor>=1?`+${Math.round((confFactor-1)*100*base/100)}%`:`${Math.round((confFactor-1)*100*base/100)}%`, icon:'💪', positive:confFactor>=1},
+    {label:'Session quality', value:qualScore.toFixed(1)+'/5', icon:'◈', positive:qualScore>=3},
+    {label:'Study consistency', value:studyDays28+'d in 28', icon:'📅', positive:studyDays28>=10},
     {label:'Topic coverage', value:Math.round(coverage*100)+'%', icon:'📚', positive:coverage>0.5},
-    {label:'Time until test', value:days>0?days+'d away':'Today', icon:'📅', positive:timeFactor>=1},
+    {label:'Time until test', value:days>0?days+'d away':'Today', icon:'⏳', positive:timeFactor>=1},
     ...(cramRatio>0.5?[{label:'Study spread', value:'Cramming detected', icon:'⚠', positive:false}]:[]),
   ];
 
-  return{point,lo,hi,base,studyFactor,confFactor,topicFactor,timeFactor,coverage,factors,days,diff,stddev,confMomentum};
+  return{point,lo,hi,base,studyFactor,confFactor,topicFactor,timeFactor,consistencyFactor,qualFactor,coverage,studyDays28,cramRatio,factors,days,diff,stddev,confMomentum};
 }
 
 function getTestGrade(pct){
@@ -845,8 +945,6 @@ function buildLbStats(data){
     streak:getStreak(sess),
     bestStreak:getBest(sess),
     sessCount:sess.filter(s=>s.subject!=='grace').length,
-    avgScore,
-    testCount:scoredTests.length,
     year:data.year||11,
     lastUpdated:Date.now(),
     subjectStats
@@ -1044,7 +1142,8 @@ function renderBreakFast(){const rem=Math.max(0,breakTarget-breakElap),m=Math.fl
 function skipBreak(){clearInterval(breakInt);S.pomodoroBreak=false;render();}
 function pauseTimer(){clearInterval(timerInt);timerRunning=false;timerElap=Math.floor((Date.now()-timerStart)/1000);}
 function resetTimer(){clearInterval(timerInt);timerRunning=false;timerElap=0;renderTimerFast();}
-function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const pct=Math.min(100,(timerElap/timerTarget)*100);const t=document.getElementById('tt-time');if(t){t.innerHTML=`${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const l=document.getElementById('tt-lbl');if(l){const focusLabels=['Ready','Focus time','In the zone','Deep focus','Unstoppable'];const fi=timerRunning?Math.min(4,Math.floor(timerElap/600)):0;l.textContent=timerRunning?focusLabels[fi]:timerElap>0?'Paused':'Ready';}const pc=document.getElementById('tt-pct');if(pc)pc.textContent=Math.round(pct)+'%';const R=88,CIRC=2*Math.PI*R;const ring=document.getElementById('tt-ring');if(ring){const themed=document.querySelector('.timer-themed');ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=timerRunning?'url(#ring-grad)':(themed?'rgba(255,255,255,.25)':'var(--bdS)');ring.setAttribute('filter',timerRunning?'url(#ring-glow)':'');}const dotAngle=((pct/100)*360-90)*Math.PI/180;const dotX=110+R*Math.cos(dotAngle),dotY=110+R*Math.sin(dotAngle);const dot=document.getElementById('tt-dot');if(dot){dot.setAttribute('cx',dotX.toFixed(1));dot.setAttribute('cy',dotY.toFixed(1));}const dotG=document.getElementById('tt-dot-glow');if(dotG){dotG.setAttribute('cx',dotX.toFixed(1));dotG.setAttribute('cy',dotY.toFixed(1));}}
+function renderTimerFast(){const rem=Math.max(0,timerTarget-timerElap),m=Math.floor(rem/60),s=rem%60;const pct=Math.min(100,(timerElap/timerTarget)*100);const t=document.getElementById('tt-time');if(t){t.innerHTML=`${String(m).padStart(2,'0')}<span class="timer-colon" id="tt-colon">:</span>${String(s).padStart(2,'0')}`;t.className='timer-num'+(timerRunning?' run':'');}const l=document.getElementById('tt-lbl');if(l){const focusLabels=['Ready','Focus time','In the zone','Deep focus','Unstoppable'];const fi=timerRunning?Math.min(4,Math.floor(timerElap/600)):0;l.textContent=timerRunning?focusLabels[fi]:timerElap>0?'Paused':'Ready';}const pc=document.getElementById('tt-pct');if(pc)pc.textContent=Math.round(pct)+'%';const R=88,CIRC=2*Math.PI*R;const ring=document.getElementById('tt-ring');const isLastMin=timerRunning&&rem<=60&&rem>0;if(ring){const themed=document.querySelector('.timer-themed');ring.style.strokeDashoffset=CIRC-(pct/100)*CIRC;ring.style.stroke=isLastMin?'var(--warn)':(timerRunning?'url(#ring-grad)':(themed?'rgba(255,255,255,.25)':'var(--bdS)'));ring.setAttribute('filter',timerRunning&&!isLastMin?'url(#ring-glow)':'');}// Apply last-minute class to the wrap container
+const tfWrap=document.querySelector('.tf-wrap');if(tfWrap){tfWrap.classList.toggle('last-minute',isLastMin);}const tCard=document.querySelector('.timer-card');if(tCard){tCard.classList.toggle('last-minute',isLastMin);}const dotAngle=((pct/100)*360-90)*Math.PI/180;const dotX=110+R*Math.cos(dotAngle),dotY=110+R*Math.sin(dotAngle);const dot=document.getElementById('tt-dot');if(dot){dot.setAttribute('cx',dotX.toFixed(1));dot.setAttribute('cy',dotY.toFixed(1));}const dotG=document.getElementById('tt-dot-glow');if(dotG){dotG.setAttribute('cx',dotX.toFixed(1));dotG.setAttribute('cy',dotY.toFixed(1));}}
 
 /* ════════════════════════════════
    AMBIENT AUDIO ENGINE
@@ -1455,7 +1554,7 @@ let S={
   papersTypeFilter:'All',   // 'All' / 'Paper' / 'Assignment' / 'Test' / 'Marking Scheme'
   papersSearch:'',
   papersSort:'date',        // 'date' / 'subject' / 'title'
-  papersData:null,          // loaded papers cache {local:[], thsc:[], hsc:[]}
+  papersData:null,          // loaded papers cache {local:[], thsc:[], hsc:[], bos:[], trials:[]}
   papersLoading:false,
   // History filters
   histSubFilter:'All',
@@ -1465,7 +1564,7 @@ let S={
   moreMenu:false,           // mobile "more" menu open
   // Leaderboard
   lbTab:0,                   // 0=rankings, 1=head-to-head, 2=teams
-  lbSort:'totalMins',        // totalMins, weekMins, streak, avgScore
+  lbSort:'totalMins',        // totalMins, weekMins, streak
   lbData:null,               // cached leaderboard rows
   lbLoading:false,
   lbRival:null,              // selected rival userId for h2h
@@ -1486,6 +1585,8 @@ let S={
   timerAudio:localStorage.getItem('mer_timer_audio')!=='0', // sound on/off
   timerFont:localStorage.getItem('mer_timer_font')||'default', // timer number font
   timerFocus:false, // fullscreen focus mode
+  timerIntent:'',   // "what are you focusing on?" pre-session intent
+  accentKey:loadAccent(), // active accent colour key
 };
 
 /* ════════════════════════════════
@@ -2143,7 +2244,19 @@ function renderDash(){
   const exam=getExamDate(year),dLeft=daysUntil(exam.date);
   const h=new Date().getHours();
   const eName=esc(name);
-  const greet=h<5?`Burning the midnight oil, ${eName}.`:h<12?`Good morning, ${eName}.`:h<17?`Good afternoon, ${eName}.`:h<21?`Good evening, ${eName}.`:`Night owl mode, ${eName}.`;
+  // Contextual greeting — based on time, study state, streak, exam proximity
+  let greet;
+  const todayStudied=todaySess(sessions).length>0;
+  const todayMinsF=dayMins(sessions,today());
+  if(dLeft<=7&&dLeft>=0){greet=`Final stretch, ${eName}.`;}
+  else if(todayStudied&&todayMinsF>=120){greet=`Strong session today, ${eName}.`;}
+  else if(todayStudied){greet=`Good work today, ${eName}.`;}
+  else if(streak>=14){greet=`Day ${streak}, ${eName}. Don't stop.`;}
+  else if(h>=17&&h<21&&!todayStudied){greet=`Evening, ${eName} — ready to lock one in?`;}
+  else if(h<5){greet=`Late night, ${eName}.`;}
+  else if(h<12){greet=`Good morning, ${eName}.`;}
+  else if(h<17){greet=`Good afternoon, ${eName}.`;}
+  else{greet=`Good evening, ${eName}.`;}
   const sMsg=streak===0?'Start your streak today.':risk&&streak>=7?`Your ${streak}-day streak ends tonight. Even 10 minutes saves it.`:risk?'Log before midnight — streak at risk.':streak===1?'Day 1. Come back tomorrow.':streak<7?`${streak} days straight.`:`${streak} days. Don't stop.`;
   const R=37,CIRC=2*Math.PI*R,pct=Math.min(1,streak/30),dashVal=pct*CIRC;
   const daysActive=new Set(sessions.filter(s=>s.subject!=='grace').map(s=>s.date)).size;
@@ -2162,17 +2275,17 @@ function renderDash(){
       const dElapsed=Math.max(0,new Date()-dFirst);
       const dPct=Math.min(100,Math.max(0,Math.round((dElapsed/dSpan)*100)));
       const dDone=new Date()>=dLast;
-      dashDayProg=`<div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;padding:10px 14px;background:var(--srf);border:1px solid var(--bd);border-radius:var(--rm);">
-        <div style="flex:1;display:flex;flex-direction:column;gap:4px;">
+      dashDayProg=`<div class="dash-day-prog${dDone?' done':''}">
+        <div class="ddp-inner">
           <div style="display:flex;justify-content:space-between;align-items:center;">
-            <span style="font-family:'DM Mono',monospace;font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:${dDone?'var(--ok)':'var(--acc)'};">${dDone?'Day complete':'Day progress'}</span>
-            <span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);">${fmtTime(dFirst)} – ${fmtTime(dLast)}</span>
+            <span class="ddp-label">${dDone?'Day complete':'Day progress'}</span>
+            <span class="ddp-time">${fmtTime(dFirst)} – ${fmtTime(dLast)}</span>
           </div>
-          <div style="height:4px;background:var(--srf2);border-radius:3px;overflow:hidden;">
-            <div id="dash-day-prog-fill" data-day-start="${todayTT[0].start}" data-day-end="${todayTT[todayTT.length-1].end}" style="height:100%;width:${dPct}%;background:${dDone?'var(--ok)':'var(--acc)'};border-radius:3px;transition:width .8s cubic-bezier(.4,0,.2,1);"></div>
+          <div class="ddp-track">
+            <div class="ddp-fill" id="dash-day-prog-fill" data-day-start="${todayTT[0].start}" data-day-end="${todayTT[todayTT.length-1].end}" style="width:${dPct}%;"></div>
           </div>
         </div>
-        <span id="dash-day-prog-pct" style="font-family:'DM Mono',monospace;font-size:11px;font-weight:500;color:${dDone?'var(--ok)':'var(--acc)'};flex-shrink:0;">${dDone?'✓':dPct+'%'}</span>
+        <span class="ddp-pct" id="dash-day-prog-pct">${dDone?'✓':dPct+'%'}</span>
       </div>`;
     }
   }
@@ -2213,12 +2326,6 @@ function renderDash(){
 
   ${dashDayProg}
 
-  ${avgHpd>0?`<div class="hsc-strip">
-    <span class="hsc-lbl">Projection</span>
-    <span class="hsc-days">~${Math.round((totalMins(sessions)/60+avgHpd*dLeft)*10)/10}h</span>
-    <span class="hsc-txt">by ${exam.name} at current pace${dLeft<=0?' · <strong>Go!</strong>':''}</span>
-  </div>`:''}
-
   <div class="streak-card${risk?' risk':''}">
     <div class="streak-body">
       <div class="ring-wrap">
@@ -2246,6 +2353,21 @@ function renderDash(){
 
   ${[7,14,21,30,50,100].includes(streak)?`<div class="streak-milestone">🎯 <strong>${streak}-day milestone!</strong> ${streak>=50?'Elite consistency. This is what separates the top 1%.':streak>=30?'A full month. The habit is locked in now.':streak>=14?'Two weeks proves it\'s not luck — it\'s discipline.':streak>=7?'One week down. Most people don\'t make it this far.':'Keep it going.'}</div>`:''}
 
+  ${(()=>{
+    const cells=[];
+    for(let i=27;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=localDate(d);cells.push({date:ds,mins:dayMins(sessions,ds),isT:ds===today()});}
+    const peak=getPeakHour(sessions);
+    const dayLabels=['M','T','W','T','F','S','S'];
+    return`<div class="hmap28-wrap" data-action="nav-history">
+      <div class="sec mb6">
+        <span class="sec-lbl">28-day activity</span>
+        ${peak?`<span class="hmap28-peak">Peak: ${peak.label}</span>`:'<span class="sec-link">History →</span>'}
+      </div>
+      <div class="hmap28-labels">${dayLabels.map(l=>`<span>${l}</span>`).join('')}</div>
+      <div class="hmap28-grid">${cells.map(c=>{let cl='';if(c.mins>=10&&c.mins<30)cl='hm-1';else if(c.mins>=30&&c.mins<60)cl='hm-2';else if(c.mins>=60&&c.mins<120)cl='hm-3';else if(c.mins>=120)cl='hm-4';return`<div class="hmap28-cell ${cl}${c.isT?' hm-today':''}" title="${fmtShort(c.date)}: ${c.mins>0?fmtDur(c.mins):'—'}"></div>`;}).join('')}</div>
+    </div>`;
+  })()}
+
   <div class="today-overview">
     <div class="ov-tile${tMins>=120?' green':''}">
       <div class="ov-ico">◷</div>
@@ -2269,7 +2391,7 @@ function renderDash(){
       <div class="ov-ico">△</div>
       <div class="ov-lbl">${exam.name}</div>
       <div class="ov-val">${Math.max(0,dLeft)}</div>
-      <div class="ov-sub">${dLeft<=0?'Exams now':'day'+(dLeft!==1?'s':'')+' to go'}</div>
+      <div class="ov-sub">${dLeft<=0?'Exams now':avgHpd>0?`~${Math.round((totalMins(sessions)/60+avgHpd*Math.max(0,dLeft))*10)/10}h by exam`:'days to go'}</div>
     </div>
   </div>
 
@@ -2332,14 +2454,6 @@ function renderDash(){
           <div class="upt-action" data-action="quick-log" data-subject="${t.subject}">Study</div>
         </div>`;
       }).join('')}
-    </div>`;
-  })()}
-
-  ${(()=>{
-    const hCells=[];for(let i=55;i>=0;i--){const d=new Date();d.setDate(d.getDate()-i);const ds=localDate(d);hCells.push({date:ds,mins:dayMins(sessions,ds),isT:ds===today()});}
-    return`<div class="dash-heatmap" data-action="nav-history">
-      <div class="sec mb6"><span class="sec-lbl">8-week activity</span><span class="sec-link">History →</span></div>
-      <div class="dash-hmap-grid">${hCells.map(c=>{let cl='h0';if(c.mins>=10&&c.mins<30)cl='h1';else if(c.mins>=30&&c.mins<60)cl='h2';else if(c.mins>=60&&c.mins<120)cl='h3';else if(c.mins>=120)cl='h4';return`<div class="dhc ${cl}${c.isT?' htoday':''}" title="${fmtShort(c.date)}: ${c.mins>0?fmtDur(c.mins):'—'}"></div>`;}).join('')}</div>
     </div>`;
   })()}
 
@@ -3053,7 +3167,7 @@ function renderProgress(){
     </div>`;
   }
 
-  function renderScoresTab(){
+  function renderPredictTab(){
     const{tests=[],subjects,sessions}=S.data;
     const real=sessions.filter(s=>s.subject!=='grace');
     // Check if there are any subjects with enough data (tests OR 2+ sessions) for predictions
@@ -3083,13 +3197,14 @@ function renderProgress(){
       <div class="ntc-action" data-action="open-log-test">Log score</div>
     </div>`:'';
 
-    // Prediction cards: subjects with tests + subjects with sessions but no tests (cold start)
+    // Build prediction data for all subjects
     const subjectsWithData=subjects.filter(sub=>{
       const hasSess=sessions.filter(s=>s.subject===sub.id&&s.subject!=='grace').length>=2;
       const hasTest=tests.some(t=>t.subject===sub.id);
       return hasTest||hasSess;
     });
-    const predCards=subjectsWithData.map(sub=>{
+
+    const subPreds=subjectsWithData.map(sub=>{
       const subTests=getSubjectTests(tests,sub.id);
       const nextT=upcoming.find(t=>t.subject===sub.id);
       const daysToNext=nextT?daysUntil(nextT.nextTestDate):30;
@@ -3097,106 +3212,139 @@ function renderProgress(){
       const c=getSubjColor(sub);
       const avgPct=getSubjectScorePct(tests,sub.id);
       const subDiff=getSubjectDifficulty(sub);
-      // Use difficulty-adjusted grade for display
-      const grade=avgPct?getDifficultyGrade(avgPct,subDiff):{letter:'—',color:'var(--tx3)'};
       const diffCtx=avgPct?getDifficultyContext(avgPct,subDiff):null;
       const hardBadge=subDiff>=1.2?'Hard':subDiff>=1.08?'Challenging':null;
+      return{sub,subTests,pred,c,avgPct,subDiff,diffCtx,hardBadge,nextT,daysToNext};
+    });
 
+    // ── HERO: aggregated overview ──
+    const predsWithData=subPreds.filter(sp=>sp.pred);
+    const heroHtml=predsWithData.length?`
+    <div class="pred-hero">
+      <div class="pred-hero-label">Grade forecast · ${predsWithData.length} subject${predsWithData.length!==1?'s':''}</div>
+      <div class="pred-hero-subjects">
+        ${predsWithData.map(sp=>{
+          const band=getHSCBand(sp.pred.point);
+          return`<div class="pred-hs-row">
+            <div class="pred-hs-abbr" style="background:${sp.c.bg};color:${sp.c.tx};border:1px solid ${sp.c.bd};">${sp.sub.abbr}</div>
+            <div class="pred-hs-name">${sp.sub.name}${sp.hardBadge?` <span style="font-size:9px;color:var(--warn);">${sp.hardBadge}</span>`:''}</div>
+            <div class="pred-hs-pct">${sp.pred.point}%</div>
+            <div class="pred-hs-band ${band.cls}">${band.label}</div>
+          </div>`;
+        }).join('')}
+      </div>
+      ${(()=>{
+        // Find weakest subject by gap: prediction - base
+        const gaps=predsWithData.filter(sp=>!sp.pred.coldStart&&sp.avgPct!=null).map(sp=>({name:sp.sub.name,gap:sp.pred.point-sp.avgPct})).sort((a,b)=>a.gap-b.gap);
+        const top=predsWithData.filter(sp=>!sp.pred.coldStart).sort((a,b)=>b.pred.point-a.pred.point)[0];
+        if(!gaps.length&&!top)return'';
+        const msgs=[];
+        if(top)msgs.push(`<strong>${esc(top.sub.name)}</strong> is your strongest subject right now.`);
+        if(gaps.length&&gaps[0].gap<0)msgs.push(`<strong>${esc(gaps[0].name)}</strong> is trending down — worth a closer look.`);
+        return msgs.length?`<div class="pred-hero-tip">${msgs.join(' ')}</div>`:'';
+      })()}
+    </div>`:'';
+
+    const predCards=subPreds.map(({sub,subTests,pred,c,avgPct,subDiff,diffCtx,hardBadge,nextT,daysToNext})=>{
       // Mini bar chart of test history
-      const bars=subTests.slice(-6).map(t=>{
+      const miniBarH=36;
+      const miniBars=subTests.slice(-6).map(t=>{
         const pct=t.score/t.outOf*100;
-        const g=getDifficultyGrade(pct,subDiff);
-        const h=Math.max(4,Math.round((pct/100)*36));
-        return`<div class="thm-bar" style="height:${h}px;background:${g.color};" title="${pct.toFixed(0)}% — ${t.name}"></div>`;
+        const dg=getDifficultyGrade(pct,subDiff);
+        const h=Math.max(4,Math.round((pct/100)*miniBarH));
+        return`<div class="pred-subject-mini-bar" style="height:${h}px;background:${dg.color};" title="${pct.toFixed(0)}% — ${t.name}"></div>`;
       }).join('');
 
-      // Improvement tip — richer, difficulty-aware
+      const grade=avgPct?getDifficultyGrade(avgPct,subDiff):{letter:'—',color:'var(--tx3)'};
+
+      // Tip — richer, more specific
       let tip='';
       if(pred&&!pred.coldStart){
         const gap=pred.point-(avgPct||50);
-        if(pred.coverage<0.5){
-          tip=`Cover more topics — you've studied ${Math.round(pred.coverage*100)}% of the ${sub.name} curriculum.`;
-        } else if(pred.confFactor<0.97){
-          tip=`Confidence is trending down in ${sub.name}. Try doing past papers or re-reading core concepts — could be a knowledge gap.`;
-        } else if(pred.studyFactor<0.98){
-          tip=`Study hours are below your average for ${sub.name} lately. Bump it up over the next ${pred.days||14} days.`;
-        } else if(pred.confMomentum&&pred.confMomentum>0.3){
-          tip=`Your confidence is accelerating in ${sub.name} — momentum is real. Keep the consistency.`;
-        } else if(gap>3){
-          tip=`On track to improve by ~${gap.toFixed(0)}%. Keep the current pace.`;
-        } else if(subDiff>=1.2&&avgPct>=55){
-          tip=`${Math.round(avgPct)}% in ${sub.name} is a genuinely strong result — this is one of the hardest subjects. Don't underestimate it.`;
-        }
+        if(pred.studyDays28<5)tip=`You've only studied ${pred.studyDays28} different days in the last 4 weeks. Spreading sessions across more days could add several percentage points.`;
+        else if(pred.cramRatio>0.5)tip=`Most of your recent study is bunched in the last week. Spreading it out builds stronger long-term retention.`;
+        else if(pred.coverage<0.5)tip=`Topic coverage is at ${Math.round(pred.coverage*100)}%. Log sessions for uncovered topics to improve your prediction.`;
+        else if(pred.confFactor<0.97)tip=`Confidence is declining — try a past paper or rework a difficult concept to rebuild understanding.`;
+        else if(pred.qualFactor<1&&pred.studyDays28>=8)tip=`Your sessions are happening regularly but confidence ratings are lower than usual. Focus on active recall rather than passive re-reading.`;
+        else if(pred.confMomentum&&pred.confMomentum>0.3)tip=`Confidence is rising fast — this momentum will keep lifting your prediction. Stay consistent.`;
+        else if(gap>3)tip=`On track to improve by ~${gap.toFixed(0)}% from your baseline. Keep the current approach going.`;
+        else if(subDiff>=1.2&&avgPct>=55)tip=`${Math.round(avgPct)}% in ${sub.name} is a strong result for one of the HSC's hardest subjects.`;
       } else if(pred?.coldStart){
-        tip=`First prediction — log a test result to sharpen this estimate.`;
+        tip=`Log a test result to sharpen this estimate — the model will immediately improve.`;
       }
 
-      // Difficulty-adjusted pred description
-      const predLabel=pred?.coldStart?'Estimated first result':'Predicted next score';
-      const predSub=pred?.coldStart
-        ?`Study-based estimate — no test history yet. Wide range is normal.`
-        :`Based on ${subTests.length} test${subTests.length!==1?'s':''}, study pace, topic coverage &amp; consistency.`;
+      const bandInfo=pred?getHSCBand(pred.point):null;
 
-      return`<div class="scores-subject-block">
-        <div class="scores-subject-hd">
-          <div style="width:30px;height:30px;border-radius:7px;background:${c.bg};border:1px solid ${c.bd};display:flex;align-items:center;justify-content:center;font-family:'DM Mono',monospace;font-size:9px;color:${c.tx};font-weight:500;">${sub.abbr}</div>
-          <div style="flex:1;">
-            <div style="font-size:13.5px;font-weight:500;color:var(--tx);letter-spacing:-.01em;">${sub.name}${hardBadge?` <span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,180,0,.15);color:#d4900a;vertical-align:middle;">${hardBadge}</span>`:''}</div>
-            <div style="font-size:11px;color:var(--tx3);">${subTests.length?`${subTests.length} test${subTests.length!==1?'s':''} · avg `:'No tests yet · '}${avgPct!=null?`<span style="color:${grade.color};font-weight:500;">${avgPct.toFixed(0)}%${diffCtx?` <span style="font-weight:400;color:var(--tx3);">— ${diffCtx}</span>`:''}</span>`:'<span style="color:var(--tx3);">studying</span>'}</div>
+      return`<div class="pred-subject-block">
+        <div class="pred-subject-hd">
+          <div class="pred-subject-badge" style="background:${c.bg};color:${c.tx};border-color:${c.bd};">${sub.abbr}</div>
+          <div class="pred-subject-meta">
+            <div class="pred-subject-name">${sub.name}${hardBadge?` <span style="font-size:9px;font-weight:600;padding:1px 5px;border-radius:4px;background:rgba(255,180,0,.12);color:#d4900a;">${hardBadge}</span>`:''}</div>
+            <div class="pred-subject-sub">${subTests.length?`${subTests.length} test${subTests.length!==1?'s':''} · avg `:'No tests · '}${avgPct!=null?`<span style="color:${grade.color};font-weight:500;">${avgPct.toFixed(0)}%${diffCtx?` — ${diffCtx}`:''}</span>`:'<em style="font-style:normal;color:var(--tx3);">studying</em>'}</div>
           </div>
-          <div class="test-history-mini">${bars}</div>
+          ${miniBars?`<div class="pred-subject-mini-bars">${miniBars}</div>`:''}
         </div>
 
-        ${pred?`<div class="pred-card${pred.coldStart?' pred-card-cold':''}">
-          <div class="pred-label">${predLabel}${nextT?' · '+daysToNext+'d away':''}</div>
-          <div class="pred-range-row">
-            <div class="pred-main">${pred.point}<span class="pred-pct">%</span></div>
-            <div class="pred-range">${pred.lo}–${pred.hi}%</div>
+        ${pred?`<div class="pred-card-dark${pred.coldStart?' cold-start':''}">
+          ${pred.coldStart?`<div class="pred-cold-note">Study-based estimate — no test history</div>`:''}
+          <div class="pred-score-row">
+            <div class="pred-score-big">${pred.point}<small>%</small></div>
+            <div class="pred-score-meta">
+              <div class="pred-range-chip">${pred.lo}–${pred.hi}%</div>
+              ${bandInfo?`<div class="pred-band-chip ${bandInfo.cls}">${bandInfo.label}</div>`:''}
+              ${nextT?`<div style="font-family:'DM Mono',monospace;font-size:9px;color:rgba(255,255,255,.4);">${daysToNext}d until test</div>`:''}
+            </div>
           </div>
-          <div class="pred-sub">${predSub}</div>
-          <div class="pred-bar-track">
-            <div class="pred-bar-fill" style="width:${pred.point}%;background:linear-gradient(90deg,rgba(255,255,255,.3),rgba(255,255,255,.7));"></div>
+          <div class="pred-progress-track">
+            <div class="pred-progress-fill" style="width:${pred.point}%;"></div>
           </div>
-          <div class="pred-factors">
-            ${pred.factors.map(f=>`<div class="pred-factor-row">
-              <div class="pred-factor-icon">${f.icon}</div>
-              <div class="pred-factor-label">${f.label}</div>
-              <div class="pred-factor-val${f.positive===true?' pos':f.positive===false?' neg':''}">${f.value}</div>
+          <div class="pred-factors-grid">
+            ${pred.factors.map(f=>`<div class="pred-factor-line">
+              <div class="pred-factor-ico">${f.icon}</div>
+              <div class="pred-factor-lbl">${f.label}</div>
+              <div class="pred-factor-v${f.positive===true?' pos':f.positive===false?' neg':''}">${f.value}</div>
             </div>`).join('')}
           </div>
         </div>`:
-        `<div class="insight-card info"><div class="insight-icon">💡</div><div class="insight-text"><div class="insight-title">Log more data for predictions</div><div class="insight-body">Need at least 2 study sessions to generate an estimate for ${sub.name}.</div></div></div>`}
+        `<div class="insight-card info"><div class="insight-icon">💡</div><div class="insight-text"><div class="insight-title">Log more data</div><div class="insight-body">Need at least 2 study sessions to generate an estimate for ${sub.name}.</div></div></div>`}
 
-        ${subTests.slice().reverse().map(t=>{
-          const pct=t.score/t.outOf*100;
-          const g=getTestGrade(pct);
-          const dg=getDifficultyGrade(pct,subDiff);
-          const ctx=getDifficultyContext(pct,subDiff);
-          return`<div class="test-card">
-            <div class="test-score-circle" style="border-color:${dg.color};color:${dg.color};">
-              <div class="test-score-pct">${pct.toFixed(0)}%</div>
-              <div class="test-score-grade">${dg.letter}</div>
-            </div>
-            <div class="test-info">
-              <div class="test-name">${t.name}</div>
-              <div class="test-meta">${fmtDate(t.date)} · ${t.type}${ctx?` · <em style="font-style:normal;color:var(--acc);">${ctx}</em>`:''}</div>
-            </div>
-            <div class="test-raw">${t.score}/${t.outOf}</div>
-            <div class="test-actions">
-              <div class="edit-btn" data-action="edit-test" data-id="${t.id}" title="Edit">✎</div>
-              <div class="del-btn" data-action="del-test" data-id="${t.id}" title="Delete">✕</div>
-            </div>
-          </div>`;
-        }).join('')}
-
-        ${tip?`<div class="improve-tip">💡 <strong>${pred?.coldStart?'Tip':'To improve'}:</strong> ${tip}</div>`:''}
+        ${tip?`<div class="pred-action-tip">→ ${tip}</div>`:''}
+        ${(()=>{
+          const reversed=subTests.slice().reverse();
+          const visible=reversed.slice(0,1);
+          const hidden=reversed.slice(1);
+          const renderCard=t=>{
+            const pct=t.score/t.outOf*100;
+            const dg=getDifficultyGrade(pct,subDiff);
+            const ctx=getDifficultyContext(pct,subDiff);
+            return`<div class="test-card">
+              <div class="test-score-circle" style="border-color:${dg.color};color:${dg.color};">
+                <div class="test-score-pct">${pct.toFixed(0)}%</div>
+                <div class="test-score-grade">${dg.letter}</div>
+              </div>
+              <div class="test-info">
+                <div class="test-name">${t.name}</div>
+                <div class="test-meta">${fmtDate(t.date)} · ${t.type}${ctx?` · <em style="font-style:normal;color:var(--acc);">${ctx}</em>`:''}</div>
+              </div>
+              <div class="test-raw">${t.score}/${t.outOf}</div>
+              <div class="test-actions">
+                <div class="edit-btn" data-action="edit-test" data-id="${t.id}" title="Edit">✎</div>
+                <div class="del-btn" data-action="del-test" data-id="${t.id}" title="Delete">✕</div>
+              </div>
+            </div>`;
+          };
+          return visible.map(renderCard).join('')+
+            (hidden.length?`<details class="pred-tests-more"><summary>${hidden.length} older test${hidden.length!==1?'s':''}</summary>${hidden.map(renderCard).join('')}</details>`:'');
+        })()}
       </div>`;
     }).join('');
 
     return`
     ${upcomingHtml}
+    ${heroHtml}
+    <div class="predict-intro"><strong>How it works:</strong> Predictions use your test history, study hours, confidence ratings, topic coverage, session quality, and study consistency — weighted and adjusted for subject difficulty. More data = tighter estimates.</div>
     ${predCards}
-    <button class="log-submit" data-action="open-log-test">＋ Log Test Score</button>`;
+    <button class="pred-tab-log-btn" data-action="open-log-test">＋ Log Test Score</button>`;
   }
 
   function renderNotesTab(){
@@ -3204,8 +3352,8 @@ function renderProgress(){
     if(!subjects.length)return`<div class="empty"><div class="empty-e">📝</div><div class="empty-t">No subjects yet</div><div class="empty-s">Add subjects in Settings to start taking notes.</div></div>`;
     return`<div class="notes-tab">${subjects.map(sub=>{const c=getSubjColor(sub);return`<div class="note-card card"><div class="note-header"><div class="note-abbr" style="background:${c.bg};color:${c.tx};border:1px solid ${c.bd};">${esc(sub.abbr)}</div><div class="note-subj">${esc(sub.name)}</div></div><textarea class="note-area" data-subid="${esc(sub.id)}" placeholder="Key formulas, quotes, definitions…">${esc(notes[sub.id]||'')}</textarea><div class="note-save-hint">Auto-saved as you type</div></div>`;}).join('')}</div>`;
   }
-  const content=[renderConfidenceTab,renderScoresTab,renderTopicsTab,renderMomentumTab,renderNotesTab][S.progTab]?.();
-  const progTabs=[{label:'Confidence',icon:'◈'},{label:'Scores',icon:'◉'},{label:'Topics',icon:'▦'},{label:'Momentum',icon:'↗'},{label:'Notes',icon:'✎'}];
+  const content=[renderPredictTab,renderConfidenceTab,renderTopicsTab,renderMomentumTab,renderNotesTab][S.progTab]?.();
+  const progTabs=[{label:'Predict',icon:'◉'},{label:'Confidence',icon:'◈'},{label:'Topics',icon:'▦'},{label:'Momentum',icon:'↗'},{label:'Notes',icon:'✎'}];
 
   // Quick summary stats
   const totalStudied=totalMins(sessions);
@@ -3213,8 +3361,24 @@ function renderProgress(){
   const topicsCovered=new Set(real.filter(s=>s.topic).map(s=>s.topic)).size;
   const testCount=(S.data.tests||[]).length;
 
+  // Milestone shelf
+  const milestones=getMilestones(sessions,S.data.tests||[],subjects);
+  const earnedMs=milestones.filter(m=>m.earned);
+  const milestoneHtml=milestones.length?`
+  <div class="milestone-shelf">
+    <div class="sec mb8"><span class="sec-lbl">Achievements</span><span style="font-family:'DM Mono',monospace;font-size:9px;color:var(--tx3);">${earnedMs.length}/${milestones.length}</span></div>
+    <div class="milestone-shelf-grid">
+      ${milestones.map(m=>`<div class="ms-trophy ${m.earned?'earned':'locked'}" title="${m.label}">
+        ${m.isNew?'<div class="ms-new-badge">NEW</div>':''}
+        <div class="ms-trophy-icon">${m.icon}</div>
+        <div class="ms-trophy-label">${m.label}</div>
+      </div>`).join('')}
+    </div>
+  </div>`:''
+
   return`
   <div class="pg-title">Progress</div>
+  ${milestoneHtml}
   <div class="prog-summary">
     <div class="prog-summary-stat">
       <div class="prog-summary-v">${fmtDur(totalStudied)}</div>
@@ -3248,9 +3412,9 @@ const THSC_SUBJECTS = [
   {code:'5320', label:'Maths Advanced', unit:'Yr 11/12', color:4},
   {code:'1370', label:'Biology', unit:'Yr 11/12', color:1},
   {code:'6520', label:'Physics', unit:'Yr 11/12', color:2},
-  {code:'1480', label:'Chemistry', unit:'Yr 11/12', color:0},
+  {code:'1820', label:'Chemistry', unit:'Yr 11/12', color:0},
   {code:'2670', label:'Engineering Studies', unit:'Yr 11/12', color:6},
-  {code:'2250', label:'English Advanced', unit:'Yr 11/12', color:5},
+  {code:'2720', label:'English Advanced', unit:'Yr 11/12', color:5},
   // Additional subjects from thsconline numbered JSONs
   {code:'1170', label:'Ancient History', unit:'Yr 11/12', color:7},
   {code:'1570', label:'Business Studies', unit:'Yr 11/12', color:6},
@@ -3259,6 +3423,47 @@ const THSC_SUBJECTS = [
   {code:'5020', label:'Legal Studies', unit:'Yr 11/12', color:3},
   {code:'2420', label:'Earth & Env Science', unit:'Yr 11/12', color:1},
   {code:'5310', label:'General Maths', unit:'Yr 11/12', color:4},
+];
+
+// thsconline school papers — trial exams and assessment tasks
+const BASE = 'https://raw.githubusercontent.com/thsconline/s/thsconline-website/yr12/';
+const THSC_TRIAL_SOURCES = [
+  // Trial papers
+  {url:BASE+'Biology/trialpapers.html',                        subject:'Biology',         type:'Trial Paper'},
+  {url:BASE+'Chemistry/trialpapers.html',                      subject:'Chemistry',       type:'Trial Paper'},
+  {url:BASE+'Physics/trialpapers.html',                        subject:'Physics',         type:'Trial Paper'},
+  {url:BASE+'Maths/trialpapers_advanced.html',                 subject:'Maths Advanced',  type:'Trial Paper'},
+  {url:BASE+'Maths/trialpapers_extension1.html',               subject:'Maths Ext 1',     type:'Trial Paper'},
+  {url:BASE+'Maths/trialpapers_extension2.html',               subject:'Maths Ext 2',     type:'Trial Paper'},
+  {url:BASE+'English/trialpapers_paper1.html',                 subject:'English Advanced',type:'Trial Paper'},
+  {url:BASE+'English/trialpapers_paper1.html',                 subject:'English Standard',type:'Trial Paper'},
+  {url:BASE+'English/trialpapers_paper2_advanced.html',        subject:'English Advanced',type:'Trial Paper'},
+  {url:BASE+'English/trialpapers_paper2_standard.html',        subject:'English Standard', type:'Trial Paper'},
+  {url:BASE+'Economics/trialpapers.html',                      subject:'Economics',       type:'Trial Paper'},
+  {url:BASE+'Legal%20Studies/trialpapers.html',                subject:'Legal Studies',   type:'Trial Paper'},
+  {url:BASE+'Business%20Studies/trialpapers.html',             subject:'Business Studies',type:'Trial Paper'},
+  {url:BASE+'Modern%20History/trialpapers.html',               subject:'Modern History',  type:'Trial Paper'},
+  {url:BASE+'Ancient%20History/trialpapers.html',              subject:'Ancient History', type:'Trial Paper'},
+  {url:BASE+'PDHPE/trialpapers.html',                          subject:'PDHPE',           type:'Trial Paper'},
+  {url:BASE+'Software/trialpapers.html',                       subject:'Software Design', type:'Trial Paper'},
+  {url:BASE+'IPT/trialpapers.html',                            subject:'IPT',             type:'Trial Paper'},
+  // Assessment tasks
+  {url:BASE+'Biology/assessment-tasks.html',                   subject:'Biology',         type:'Assessment Task'},
+  {url:BASE+'Chemistry/assessment-tasks.html',                 subject:'Chemistry',       type:'Assessment Task'},
+  {url:BASE+'Physics/assessment-tasks.html',                   subject:'Physics',         type:'Assessment Task'},
+  {url:BASE+'Maths/assessment-tasks_advanced.html',            subject:'Maths Advanced',  type:'Assessment Task'},
+  {url:BASE+'Maths/assessment-tasks_extension1.html',          subject:'Maths Ext 1',     type:'Assessment Task'},
+  {url:BASE+'Maths/assessment-tasks_extension2.html',          subject:'Maths Ext 2',     type:'Assessment Task'},
+  {url:BASE+'English/assessment-tasks.html',                   subject:'English Advanced',type:'Assessment Task'},
+  {url:BASE+'English/assessment-tasks.html',                   subject:'English Standard',type:'Assessment Task'},
+  {url:BASE+'IPT/assessment-tasks.html',                       subject:'IPT',             type:'Assessment Task'},
+  {url:BASE+'Software/assessment-tasks.html',                  subject:'Software Design', type:'Assessment Task'},
+  {url:BASE+'Legal%20Studies/assessment-tasks.html',           subject:'Legal Studies',   type:'Assessment Task'},
+  {url:BASE+'Business%20Studies/assessment-tasks.html',        subject:'Business Studies',type:'Assessment Task'},
+  {url:BASE+'Modern%20History/assessment-tasks.html',          subject:'Modern History',  type:'Assessment Task'},
+  {url:BASE+'Ancient%20History/assessment-tasks.html',         subject:'Ancient History', type:'Assessment Task'},
+  {url:BASE+'Economics/assessment-tasks.html',                 subject:'Economics',       type:'Assessment Task'},
+  {url:BASE+'PDHPE/assessment-tasks.html',                     subject:'PDHPE',           type:'Assessment Task'},
 ];
 
 // Bored of Studies resource category IDs per subject
@@ -3347,6 +3552,53 @@ async function loadAllBosData(){
   return scraped.length>0?scraped:fallback;
 }
 
+async function loadTrialPapers(){
+  const results=[];
+  await Promise.all(THSC_TRIAL_SOURCES.map(async src=>{
+    const subj=THSC_SUBJECTS.find(s=>s.label===src.subject);
+    const color=subj?.color??6;
+    try{
+      const r=await fetch(src.url);
+      if(!r.ok)return;
+      const html=await r.text();
+      const doc=new DOMParser().parseFromString(html,'text/html');
+      doc.querySelectorAll('a').forEach(a=>{
+        const href=a.getAttribute('href')||'';
+        const onclick=a.getAttribute('onclick')||'';
+        if(href!=='#v'&&!onclick.includes('pdf('))return;
+        const codeMatch=onclick.match(/pdf\s*\(\s*this\s*,\s*['"]?(\w+)['"]?\s*\)/);
+        if(!codeMatch)return;
+        const tcode=codeMatch[1];
+        const text=a.textContent.trim();
+        if(!text)return;
+        const yearMatch=text.match(/\b(20\d{2})\b/);
+        const hasSol=/w\.?\s*sol/i.test(text);
+        // paperName for URL = text minus solutions suffix
+        const paperName=text.replace(/\s*w\.?\s*sol.*$/i,'').trim();
+        // school = paperName minus trailing year
+        const school=paperName.replace(/\s*\b20\d{2}\b\s*$/,'').trim()||paperName;
+        const year=yearMatch?.[1]||'';
+        results.push({
+          id:`trial-${src.subject.replace(/\s/g,'_')}-${tcode}-${encodeURIComponent(paperName)}`,
+          title:paperName+(hasSol?' (w. Solutions)':''),
+          subject:src.subject,
+          school,
+          year,
+          unit:'Yr 12',
+          source:'trials',
+          type:src.type||'Trial Paper',
+          hasSolutions:hasSol,
+          color,
+          external:true,
+          topics:[],
+          url:`https://thsconline.github.io/s/v/${tcode}/${encodeURIComponent(paperName)}`,
+        });
+      });
+    }catch(e){}
+  }));
+  return results;
+}
+
 // HSCpapers.json course names to match subjects
 const HSC_COURSE_MAP = {
   'Chemistry':'Chemistry',
@@ -3377,7 +3629,7 @@ const HSC_COURSE_MAP = {
   'Senior Science':'Senior Science',
 };
 
-let papersCache = null; // {local, thsc, hsc}
+let papersCache = null; // {local, thsc, hsc, bos, trials}
 let pdfViewerState = null; // {url, title}
 
 async function loadPapersData(force=false){
@@ -3478,10 +3730,13 @@ async function loadPapersData(force=false){
   } catch(e){}
 
   // 4. Load Bored of Studies resources (notes, trials, assessments)
-  try{
-    const bosEntries=await loadAllBosData();
-    result.bos=bosEntries;
-  }catch(e){result.bos=[];}
+  // 5. Load thsconline school trial papers (parallel with BoS)
+  const [bosEntries,trialEntries]=await Promise.all([
+    loadAllBosData().catch(()=>[]),
+    loadTrialPapers().catch(()=>[]),
+  ]);
+  result.bos=bosEntries;
+  result.trials=trialEntries;
 
   papersCache = result;
   return result;
@@ -3505,12 +3760,10 @@ function renderPapers(){
   }
 
   if(S.papersLoading || !data){
+    const skelCards=Array.from({length:8},()=>`<div class="paper-skel"><div class="paper-skel-thumb"></div><div class="paper-skel-info"><div class="paper-skel-line"></div><div class="paper-skel-line short"></div><div class="paper-skel-line xshort"></div></div></div>`).join('');
     return`
     <div class="pg-title">Papers</div>
-    <div class="papers-loading">
-      <div class="papers-spinner"></div>
-      Loading papers from thsconline…
-    </div>`;
+    <div class="papers-skel-grid">${skelCards}</div>`;
   }
 
   // Merge and flatten all papers
@@ -3519,6 +3772,7 @@ function renderPapers(){
     ...data.thsc,
     ...data.hsc,
     ...(data.bos||[]),
+    ...(data.trials||[]),
   ];
 
   // Filter
@@ -3555,31 +3809,43 @@ function renderPapers(){
 
   const cards = filtered.map(p=>{
     const c = p.color!==undefined ? getSubjColor({color:p.color}) : {bg:'var(--srf2)',tx:'var(--tx3)',bd:'var(--bd)'};
+    const isTrials = p.source==='trials';
     const srcBadge = p.source==='mine'
       ? `<div class="paper-src-badge badge-mine">Mine</div>`
       : p.source==='boredofstudies'
       ? `<div class="paper-src-badge badge-bos">BoS</div>`
       : p.source==='thsconline'
       ? `<div class="paper-src-badge badge-thsc">thsc</div>`
+      : isTrials
+      ? `<div class="paper-src-badge badge-trials">Trial</div>`
       : `<div class="paper-src-badge badge-hsc">HSC</div>`;
     const solDot = p.hasSolutions ? `<div class="paper-sol-dot" title="Solutions available"></div>` : '';
     const topicTags = (p.topics||[]).slice(0,4).map(t=>`<span class="paper-topic-tag">${t}</span>`).join('');
 
-    return`<div class="paper-card" data-action="${p.external?'open-paper-ext':'open-paper'}" data-url="${p.url}" data-title="${p.title.replace(/"/g,'&quot;')}" data-id="${p.id}">
+    const thumbInner = p.source==='mine'
+      ? `<canvas id="canvas-${p.id}" data-pdf-url="${p.url}"></canvas>`
+      : isTrials
+      ? `<div class="paper-thumb-placeholder ptp-trial">
+          <div class="ptp-subject" style="background:${c.bg};color:${c.tx};border:1px solid ${c.bd};">${p.subject||'Trial'}</div>
+          <div class="ptp-school">${esc(p.school||'')}</div>
+          <div class="ptp-year">${p.year||''}</div>
+          ${p.hasSolutions?`<div class="ptp-sol-tag">w. sol</div>`:''}
+        </div>`
+      : `<div class="paper-thumb-placeholder">
+          <div class="ptp-subject" style="background:${c.bg};color:${c.tx};border:1px solid ${c.bd};">${p.subject||'HSC'}</div>
+          <div class="ptp-year">${p.year||''}</div>
+          <div class="ptp-type">${p.type||'Paper'}</div>
+          <div class="ptp-icon">${p.external?'↗':'📄'}</div>
+        </div>`;
+
+    return`<div class="paper-card${isTrials?' paper-card-trial':''}" data-action="${isTrials?'open-paper':p.external?'open-paper-ext':'open-paper'}" ${isTrials?'data-direct="1"':''} data-url="${p.url}" data-title="${p.title.replace(/"/g,'&quot;')}" data-id="${p.id}">
       <div class="paper-thumb" id="thumb-${p.id}">
-        ${p.source==='mine'
-          ? `<canvas id="canvas-${p.id}" data-pdf-url="${p.url}"></canvas>`
-          : `<div class="paper-thumb-placeholder">
-              <div class="ptp-subject" style="background:${c.bg};color:${c.tx};border:1px solid ${c.bd};">${p.subject||'HSC'}</div>
-              <div class="ptp-year">${p.year||''}</div>
-              <div class="ptp-type">${p.type||'Paper'}</div>
-              <div class="ptp-icon">${p.external?'↗':'📄'}</div>
-            </div>`
-        }
+        ${thumbInner}
         ${srcBadge}
         ${solDot}
       </div>
       <div class="paper-info">
+        ${isTrials&&p.school?`<div class="paper-school">${esc(p.school)}</div>`:''}
         <div class="paper-title">${p.title}</div>
         <div class="paper-meta">
           ${p.unit?`<span class="pm-tag" style="background:${c.bg};color:${c.tx};border-color:${c.bd};">${p.unit}</span>`:''}
@@ -3634,6 +3900,7 @@ function renderPapers(){
         ${chipFilter('thsconline','thsconline','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='thsconline').length)}
         ${chipFilter('HSC Official','HSC Official','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='HSC Official').length)}
         ${chipFilter('BoredOfStudies','boredofstudies','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='boredofstudies').length)}
+        ${chipFilter('School Trials','trials','papers-filter-src',S.papersSrcFilter,all.filter(p=>p.source==='trials').length)}
       </div>
     </div>
   </div>
@@ -3766,6 +4033,9 @@ function renderTimerFocus(){
           ${timerElap>0?`<div class="timer-pct tf-pct" id="tt-pct">${Math.round(pct)}%</div>`:''}
         </div>
       </div>
+      ${!timerRunning&&timerElap===0?`<div class="tf-intent-wrap">
+        <input class="tf-intent-input" id="tf-intent-inp" type="text" maxlength="60" placeholder="What are you focusing on?" value="${esc(S.timerIntent||'')}">
+      </div>`:''}
       <div class="tf-controls">
         ${timerRunning
           ?`<button class="tf-btn tf-btn-pause" data-action="timer-pause"><span class="timer-btn-icon">❚❚</span>Pause</button>`
@@ -3883,101 +4153,64 @@ function renderTimer(){
         </div>
       </div>
     </div>
+    ${!timerRunning&&timerElap===0?`<div class="timer-intent-wrap">
+      <input class="timer-intent-input" id="timer-intent-inp" type="text" maxlength="60" placeholder="What are you focusing on?" value="${esc(S.timerIntent||'')}">
+    </div>`:''}
+    <div class="timer-preset-pills${timerRunning?' tpp-running':''}">
+      ${presets.map(t=>{
+        const active=timerTarget===t*60&&!timerRunning;
+        const label=presetLabels[t]||'';
+        return`<div class="tpp${active?' on':''}${timerRunning?' tpp-locked':''}" data-action="set-timer" data-dur="${t}">${t}<small>m</small>${active&&label?`<em>${label}</em>`:''}</div>`;
+      }).join('')}
+    </div>
     <div class="timer-controls">
       ${timerRunning
         ?`<button class="timer-btn timer-btn-pause${themed?' themed':''}" data-action="timer-pause"><span class="timer-btn-icon">❚❚</span>Pause</button>`
         :`<button class="timer-btn timer-btn-start${themed?' themed':''}" data-action="timer-start"><span class="timer-btn-icon">▶</span>${timerElap>0?'Resume':'Start'}</button>`}
       <button class="timer-btn timer-btn-reset${themed?' themed':''}" data-action="timer-reset"><span class="timer-btn-icon">↺</span>Reset</button>
     </div>
+    ${pomoCount>0?`<div class="timer-pomo-inline">
+      <div class="pomo-dots">${pomoDots}</div>
+      <span class="pomo-count">${pomoCount} done${pomoCount%4===0?' · long break earned':` · ${4-pomoCount%4} to break`}</span>
+    </div>`:''}
     ${timerElap>0&&!timerRunning?`<button class="timer-log-cta" data-action="open-log">Log ${fmtDur(Math.ceil(timerElap/60))} session →</button>`:''}
   </div>
 
-  <div class="card timer-presets-card">
-    <div class="sec mb8"><span class="sec-lbl">Duration</span></div>
-    <div class="timer-preset-grid">${presets.map(t=>{
-      const active=timerTarget===t*60&&!timerRunning;
-      const label=presetLabels[t]||'';
-      return`<div class="timer-preset${active?' on':''}" data-action="set-timer" data-dur="${t}">
-        <span class="timer-preset-num">${t}</span><span class="timer-preset-unit">min</span>
-        ${label?`<span class="timer-preset-label">${label}</span>`:''}
-      </div>`;
-    }).join('')}</div>
-  </div>
-
-  ${pomoCount>0?`<div class="card timer-pomo-card">
-    <div class="sec mb8"><span class="sec-lbl">Pomodoros</span></div>
-    <div class="pomo-tracker">
-      <div class="pomo-dots">${pomoDots}</div>
-      <span class="pomo-count">${pomoCount} done${pomoCount%4===0?' — long break earned!':` — ${4-pomoCount%4} until long break`}</span>
-    </div>
-  </div>`:''}
-
-  <div class="card timer-today-card">
-    <div class="sec mb8"><span class="sec-lbl">Today</span></div>
-    ${todaySess.length?`<div class="timer-today-stats">
-      <div class="timer-today-stat">
-        <div class="timer-today-v">${fmtDur(todayMins)}</div>
-        <div class="timer-today-l">studied</div>
-      </div>
-      <div class="timer-today-stat">
-        <div class="timer-today-v">${todaySess.length}</div>
-        <div class="timer-today-l">session${todaySess.length!==1?'s':''}</div>
-      </div>
-    </div>
-    <div class="timer-today-list">${todaySess.slice(-3).reverse().map(ss=>{
+  ${todaySess.length?`<div class="timer-today-strip">
+    <span class="tts-meta">${fmtDur(todayMins)} · ${todaySess.length} session${todaySess.length!==1?'s':''} today</span>
+    <div class="tts-list">${todaySess.slice(-3).reverse().map(ss=>{
       const sub=S.data.subjects.find(x=>x.id===ss.subject)||{name:ss.subject,abbr:'?',color:0};
       const c=getSubjColor(sub);
-      return`<div class="timer-today-row">
-        <div class="timer-today-dot" style="background:${c.bg};border:1px solid ${c.bd};"></div>
-        <span class="timer-today-name">${esc(sub.name)}</span>
-        <span class="timer-today-dur">${fmtDur(ss.duration)}</span>
-      </div>`;
-    }).join('')}</div>`
-    :`<div class="timer-today-empty">No sessions yet today — start your first one above</div>`}
-  </div>
+      return`<div class="tts-row"><div class="tts-dot" style="background:${c.bg};border:1px solid ${c.bd};"></div><span class="tts-name">${esc(sub.name)}</span><span class="tts-dur">${fmtDur(ss.duration)}</span></div>`;
+    }).join('')}</div>
+  </div>`:''}
 
-  <div class="card timer-ambiance-card">
-    <div class="sec mb8"><span class="sec-lbl">Ambiance</span>${S.timerBg!=='none'?`<span class="amb-sound-toggle" data-action="toggle-timer-audio">${S.timerAudio?'🔊 Sound on':'🔇 Sound off'}</span>`:''}</div>
-    <div class="amb-grid">
-      <div class="amb-opt${S.timerBg==='none'?' on':''}" data-action="set-timer-bg" data-bg="none">
-        <div class="amb-icon">◯</div><div class="amb-label">None</div>
+  <div class="card timer-opts-card">
+    <div class="timer-opts-row">
+      <span class="timer-opts-lbl">Scene</span>
+      <div class="timer-amb-pills">
+        <div class="tap${S.timerBg==='none'?' on':''}" data-action="set-timer-bg" data-bg="none">—</div>
+        <div class="tap${S.timerBg==='forest'?' on':''}" data-action="set-timer-bg" data-bg="forest">Forest</div>
+        <div class="tap${S.timerBg==='cafe'?' on':''}" data-action="set-timer-bg" data-bg="cafe">Cafe</div>
+        <div class="tap${S.timerBg==='ocean'?' on':''}" data-action="set-timer-bg" data-bg="ocean">Ocean</div>
       </div>
-      <div class="amb-opt${S.timerBg==='forest'?' on':''}" data-action="set-timer-bg" data-bg="forest">
-        <div class="amb-preview amb-prev-forest"></div>
-        <div class="amb-label">Forest</div>
-      </div>
-      <div class="amb-opt${S.timerBg==='cafe'?' on':''}" data-action="set-timer-bg" data-bg="cafe">
-        <div class="amb-preview amb-prev-cafe"></div>
-        <div class="amb-label">Jazz Cafe</div>
-      </div>
-      <div class="amb-opt${S.timerBg==='ocean'?' on':''}" data-action="set-timer-bg" data-bg="ocean">
-        <div class="amb-preview amb-prev-ocean"></div>
-        <div class="amb-label">Ocean</div>
+      ${S.timerBg!=='none'?`<div class="timer-sound-tog" data-action="toggle-timer-audio" title="Toggle sound">${S.timerAudio?'🔊':'🔇'}</div>`:''}
+    </div>
+    <div class="timer-opts-div"></div>
+    <div class="timer-opts-row">
+      <span class="timer-opts-lbl">Font</span>
+      <div class="timer-font-pills">
+        ${[
+          {id:'default',label:'Default',family:"'Cormorant',serif"},
+          {id:'mono',label:'Mono',family:"'DM Mono',monospace"},
+          {id:'space',label:'Space',family:"'Space Mono',monospace"},
+          {id:'playfair',label:'Playfair',family:"'Playfair Display',serif"},
+          {id:'outfit',label:'Outfit',family:"'Outfit',sans-serif"},
+          {id:'jetbrains',label:'JBM',family:"'JetBrains Mono',monospace"},
+        ].map(f=>`<div class="tfp${S.timerFont===f.id?' on':''}" data-action="set-timer-font" data-font="${f.id}" style="font-family:${f.family};">${f.label}</div>`).join('')}
       </div>
     </div>
-  </div>
-
-  <div class="card timer-font-card">
-    <div class="sec mb8"><span class="sec-lbl">Clock font</span></div>
-    <div class="timer-font-grid">
-      ${[
-        {id:'default',label:'Default',family:"'Cormorant',serif",sample:'08:25'},
-        {id:'mono',label:'Mono',family:"'DM Mono',monospace",sample:'08:25'},
-        {id:'space',label:'Space',family:"'Space Mono',monospace",sample:'08:25'},
-        {id:'playfair',label:'Playfair',family:"'Playfair Display',serif",sample:'08:25'},
-        {id:'outfit',label:'Outfit',family:"'Outfit',sans-serif",sample:'08:25'},
-        {id:'jetbrains',label:'JetBrains',family:"'JetBrains Mono',monospace",sample:'08:25'},
-      ].map(f=>`<div class="timer-font-opt${S.timerFont===f.id?' on':''}" data-action="set-timer-font" data-font="${f.id}">
-        <div class="timer-font-sample" style="font-family:${f.family};">${f.sample}</div>
-        <div class="timer-font-label">${f.label}</div>
-      </div>`).join('')}
-    </div>
-  </div>
-
-  ${!timerRunning&&timerElap===0?`<div class="card timer-tip">
-    <div class="timer-tip-icon">◷</div>
-    <div><strong>Pick a duration</strong> → start → study with focus → tap <strong style="color:var(--ok);">Log it</strong> when done.</div>
-  </div>`:''}`;
+  </div>`;
 }
 
 /* ════════════════════════════════
@@ -4093,7 +4326,7 @@ function renderAssess(){
   </div>`:''}
   ${renderDayStrip()}
   ${!upcoming.length&&!overdue.length?`<div class="empty" style="padding-top:32px;"><div class="empty-e">📋</div><div class="empty-t">No upcoming assessments</div><div class="empty-s">Add tests, assignments and exams above.</div></div>`:''}
-  ${overdue.length?`<div class="assess-section-hd assess-overdue-hd">Overdue <span class="assess-count assess-count-red">${overdue.length}</span></div>${overdue.map(a=>renderAssessCard(a)).join('')}`:''}
+  ${overdue.length?`<div class="assess-overdue-banner"><span class="assess-overdue-icon">!</span><span>${overdue.length} overdue assessment${overdue.length!==1?'s':''} — mark done or reschedule</span></div>${overdue.map(a=>renderAssessCard(a)).join('')}`:''}
   ${upcoming.length?`<div class="assess-section-hd">Upcoming <span class="assess-count">${upcoming.length}</span></div>${upcoming.map(a=>renderAssessCard(a)).join('')}`:''}
   ${done.length?`<div class="assess-section-hd" style="margin-top:20px;">Recently done</div>${done.map(a=>renderAssessCard(a,true)).join('')}`:''}`;
 }
@@ -4262,6 +4495,9 @@ function renderSettings(){
       <div class="settings-stat"><div class="settings-stat-v">${fmtDur(totalMins(sessions))}</div><div class="settings-stat-l">study time</div></div>
       <div class="settings-stat"><div class="settings-stat-v">${fmtShort(joined)}</div><div class="settings-stat-l">joined</div></div>
     </div>
+    <div class="srow"><span class="srow-l">Accent colour</span>
+      <div class="accent-picker">${Object.entries(ACCENT_PRESETS).map(([k,p])=>`<div class="ac-swatch${S.accentKey===k?' on':''}" data-action="set-accent" data-key="${k}" style="background:${p.acc};" title="${k}"></div>`).join('')}</div>
+    </div>
     <div class="srow"><span class="srow-l">Dark mode</span><div class="toggle${S.darkMode?' on':''}" data-action="toggle-dark"><div class="toggle-knob"></div></div></div>
     <div class="srow"><span class="srow-l">Streak reminders</span><div class="toggle${'Notification' in window&&Notification.permission==='granted'?' on':''}" data-action="toggle-notif"><div class="toggle-knob"></div></div></div>
     <div class="srow"><span class="srow-l">Daily study goal</span><div style="display:flex;align-items:center;gap:6px;"><input type="number" id="sdailygoal" min="15" max="480" step="15" value="${S.data.dailyGoalMins||90}" style="font-family:'DM Mono',monospace;font-size:12px;color:var(--tx);border:none;background:transparent;outline:none;text-align:right;width:50px;cursor:text;"><span style="font-size:12px;color:var(--tx3);">min/day</span></div></div>
@@ -4287,31 +4523,33 @@ function renderSettings(){
 
   <div class="sset">
     <div class="sset-t">◈ Social login</div>
-    <div class="firebase-setup">
-      <strong style="color:var(--tx);">1. Firebase project setup:</strong><ol style="padding-left:16px;margin-top:4px;">
-      <li>Go to <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a></li>
-      <li>Create project → Authentication → Sign-in method</li>
-      <li>Enable <strong>Google</strong> (just flip the toggle)</li>
-      <li>Project settings → Your apps → Add web app → Copy config</li>
-      <li>Open <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">index.html</code>, find <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">window.FIREBASE_CONFIG = null</code> and replace <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">null</code> with your config object</li>
-      <li>Add your domain to Firebase → Authentication → Authorised domains</li>
-      </ol>
-      <div style="margin-top:10px;"><strong style="color:var(--tx);">2. Enable GitHub login (optional):</strong></div>
-      <ol style="padding-left:16px;margin-top:4px;">
-      <li>Go to <a href="https://github.com/settings/developers" target="_blank">github.com/settings/developers</a> → OAuth Apps → New</li>
-      <li>Set Homepage URL to your site (e.g. <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">https://you.github.io/meridian</code>)</li>
-      <li>Set Authorization callback URL — copy it from Firebase: Authentication → Sign-in method → GitHub → callback URL</li>
-      <li>Copy the <strong>Client ID</strong> and <strong>Client secret</strong> from GitHub into the Firebase GitHub provider config</li>
-      <li>Enable the GitHub provider in Firebase</li>
-      </ol>
-      <div style="margin-top:6px;color:var(--ok);">✓ Both providers are free. Works on GitHub Pages with zero server.</div>
-      <div style="margin-top:10px;"><strong style="color:var(--tx);">3. Enable Leaderboard (Firestore):</strong></div>
-      <ol style="padding-left:16px;margin-top:4px;">
-      <li>In your Firebase project → Build → Firestore Database</li>
-      <li>Click "Create database" → Start in <strong>test mode</strong> → Done</li>
-      <li>That's it — leaderboard will auto-sync when you log sessions</li>
-      </ol>
-    </div>
+    <div style="font-size:13px;color:var(--tx2);margin-bottom:10px;">Connect Google or GitHub to enable Cloud Sync and leaderboard auto-restore across devices.</div>
+    <details class="settings-details">
+      <summary class="settings-details-summary">Setup instructions (advanced) →</summary>
+      <div class="firebase-setup">
+        <strong style="color:var(--tx);">1. Firebase project setup:</strong><ol style="padding-left:16px;margin-top:4px;">
+        <li>Go to <a href="https://console.firebase.google.com" target="_blank">console.firebase.google.com</a></li>
+        <li>Create project → Authentication → Sign-in method</li>
+        <li>Enable <strong>Google</strong> (just flip the toggle)</li>
+        <li>Project settings → Your apps → Add web app → Copy config</li>
+        <li>Open <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">index.html</code>, find <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">window.FIREBASE_CONFIG = null</code> and replace <code style="font-family:'DM Mono',monospace;background:var(--srf3);padding:1px 5px;border-radius:3px;">null</code> with your config object</li>
+        <li>Add your domain to Firebase → Authentication → Authorised domains</li>
+        </ol>
+        <div style="margin-top:10px;"><strong style="color:var(--tx);">2. Enable GitHub login (optional):</strong></div>
+        <ol style="padding-left:16px;margin-top:4px;">
+        <li>Go to <a href="https://github.com/settings/developers" target="_blank">github.com/settings/developers</a> → OAuth Apps → New</li>
+        <li>Set Homepage URL to your site</li>
+        <li>Set Authorization callback URL — copy from Firebase: Authentication → Sign-in method → GitHub → callback URL</li>
+        <li>Copy the <strong>Client ID</strong> and <strong>Client secret</strong> into the Firebase GitHub provider config</li>
+        </ol>
+        <div style="margin-top:6px;color:var(--ok);">✓ Both providers are free. Works on GitHub Pages with zero server.</div>
+        <div style="margin-top:10px;"><strong style="color:var(--tx);">3. Enable Leaderboard (Firestore):</strong></div>
+        <ol style="padding-left:16px;margin-top:4px;">
+        <li>In your Firebase project → Build → Firestore Database</li>
+        <li>Click "Create database" → Start in <strong>test mode</strong> → Done</li>
+        </ol>
+      </div>
+    </details>
   </div>
   <div class="sset">
     <div class="sset-t">↕ Cloud sync</div>
@@ -4354,35 +4592,30 @@ function renderLeaderboard(){
 
   const myId=getLbUserId();
   const rows=S.lbData||[];
+  if(S.lbSort==='avgScore')S.lbSort='totalMins';
   const sortKey=S.lbSort;
-  const sortLabel={totalMins:'All-time',weekMins:'This week',streak:'Streak',avgScore:'Test avg'};
-  const sortIcons={totalMins:'∑',weekMins:'◷',streak:'🔥',avgScore:'◈'};
+  const sortLabel={totalMins:'All-time',weekMins:'This week',streak:'Streak'};
+  const sortIcons={totalMins:'∑',weekMins:'◷',streak:'🔥'};
   const isPeriodSort=sortKey==='totalMins'||sortKey==='weekMins';
   const period=sortKey==='weekMins'?'week':'alltime'; // used for display logic
 
-  const sorted=[...rows].sort((a,b)=>{
-    if(sortKey==='avgScore')return(b.avgScore||0)-(a.avgScore||0);
-    return(b[sortKey]||0)-(a[sortKey]||0);
-  });
+  const sorted=[...rows].sort((a,b)=>(b[sortKey]||0)-(a[sortKey]||0));
 
   function fmtLbVal(row,key){
     if(key==='weekMins'||key==='totalMins')return fmtDur(row[key]||0);
     if(key==='streak')return(row[key]||0)+' day'+(row[key]===1?'':'s');
-    if(key==='avgScore')return row[key]!=null?row[key]+'%':'—';
     return row[key]||'—';
   }
   function fmtLbValShort(row,key){
     if(key==='weekMins'||key==='totalMins')return fmtDur(row[key]||0);
     if(key==='streak')return(row[key]||0)+'d';
-    if(key==='avgScore')return row[key]!=null?row[key]+'%':'—';
     return row[key]||'—';
   }
   function secondaryInfo(r,key){
     if(key==='weekMins') return`${fmtDur(r.totalMins||0)} all-time · ${r.streak||0}d streak`;
     if(key==='totalMins') return`${r.sessCount||0} sessions · ${fmtDur(r.weekMins||0)} this wk`;
     if(key==='streak') return`${fmtDur(r.weekMins||0)} this week · ${fmtDur(r.totalMins||0)} all-time`;
-    if(key==='avgScore') return`${r.testCount||0} test${r.testCount===1?'':'s'} · Yr ${r.year||'?'}`;
-    return`Yr ${r.year||'?'}`;
+    return`${r.sessCount||0} sessions · Yr ${r.year||'?'}`;
   }
 
   // Last week winner (computed once)
@@ -4444,8 +4677,8 @@ function renderLeaderboard(){
           <div class="lb-mystats-l">Streak</div>
         </div>
         <div class="lb-mystats-item">
-          <div class="lb-mystats-v">${me.avgScore!=null?me.avgScore+'%':'—'}</div>
-          <div class="lb-mystats-l">Test avg</div>
+          <div class="lb-mystats-v">${me.sessCount||0}</div>
+          <div class="lb-mystats-l">Sessions</div>
         </div>
       </div>
       ${pctile>=50?`<div class="lb-mystats-pctile">Top ${100-pctile}% of all students</div>`:''}
@@ -4553,8 +4786,8 @@ function renderLeaderboard(){
     const rival=rows.find(r=>r.userId===S.lbRival);
     if(!rival){S.lbRival=null;return renderH2H();}
 
-    const modes=[['weekMins','Weekly study'],['totalMins','All-time'],['streak','Streak'],['avgScore','Test avg']];
-    const modeIcons={weekMins:'◷',totalMins:'∑',streak:'🔥',avgScore:'◈'};
+    const modes=[['weekMins','Weekly study'],['totalMins','All-time'],['streak','Streak']];
+    const modeIcons={weekMins:'◷',totalMins:'∑',streak:'🔥'};
 
     function makeBar(mv2,rv2){
       const total=(mv2||0)+(rv2||0);
@@ -4662,7 +4895,6 @@ function renderLeaderboard(){
         {label:'Best streak',va:(agg.a.bestStreak||0)+'d',vb:(agg.b.bestStreak||0)+'d',na:agg.a.bestStreak,nb:agg.b.bestStreak},
         {label:'Active this week',va:agg.a.active+'/'+agg.a.count,vb:agg.b.active+'/'+agg.b.count,na:agg.a.active/(agg.a.count||1),nb:agg.b.active/(agg.b.count||1)},
       ];
-      if(agg.a.avgScore!=null||agg.b.avgScore!=null)metrics.push({label:'Avg test score',va:agg.a.avgScore!=null?agg.a.avgScore+'%':'—',vb:agg.b.avgScore!=null?agg.b.avgScore+'%':'—',na:agg.a.avgScore||0,nb:agg.b.avgScore||0});
 
       let winsA=0,winsB=0;
       metrics.forEach(m=>{if(m.na>m.nb)winsA++;else if(m.nb>m.na)winsB++;});
@@ -4768,9 +5000,7 @@ function renderLeaderboard(){
         ${members.map((m,i)=>{
           const isMe=m.userId===myId;
           const medals=['🥇','🥈','🥉'];
-          const secondary=subj
-            ?(m.avgScore!=null?m.avgScore+'% avg · ':'')+fmtDur(m.totalMins||0)+' total'
-            :(m.streak||0)+'d streak · '+fmtDur(m.totalMins||0)+' total';
+          const secondary=(m.streak||0)+'d streak · '+fmtDur(m.totalMins||0)+' total';
           return`<div class="lb-row${isMe?' lb-me':''}">
             <div class="lb-rank"><span class="lb-rank-num">${i<3?medals[i]:i+1}</span></div>
             <div class="lb-avatar" style="background:${isMe?'var(--acc)':'var(--srf3)'};color:${isMe?'#fff':'var(--tx2)'};">${esc((m.name||'?')[0].toUpperCase())}</div>
@@ -4958,7 +5188,7 @@ function renderProfileModal(){
           <div class="prof-stat"><div class="prof-stat-v">${fmtDur(lbRow.totalMins||0)}</div><div class="prof-stat-l">Total</div></div>
           <div class="prof-stat"><div class="prof-stat-v">${fmtDur(lbRow.weekMins||0)}</div><div class="prof-stat-l">This week</div></div>
           <div class="prof-stat"><div class="prof-stat-v">${lbRow.streak||0}d</div><div class="prof-stat-l">Streak</div></div>
-          <div class="prof-stat"><div class="prof-stat-v">${lbRow.avgScore!=null?lbRow.avgScore+'%':'—'}</div><div class="prof-stat-l">Avg score</div></div>
+          <div class="prof-stat"><div class="prof-stat-v">${lbRow.sessCount||0}</div><div class="prof-stat-l">Sessions</div></div>
         </div>`:''}
 
         ${badges.length?`<div class="prof-section-lbl">Achievements</div>
@@ -5446,8 +5676,9 @@ const A={
     } else {
       S.data.assessments.push({id:uid(),name,date,subject,type,weight,notes,done:false,created:today()});
     }
+    const wasEdit=!!S._assessEdit;
     saveLocal(S.data);triggerSync();S.modal=null;S._assessEdit=null;document.body.classList.remove('modal-open');render();
-    showToast(S._assessEdit?'Assessment updated.':'Assessment added.','✓');
+    showToast(wasEdit?'Assessment updated.':'Assessment added.','✓');
   },
   'assess-done':(btn)=>{
     const a=(S.data.assessments||[]).find(x=>x.id===btn.dataset.id);
@@ -5817,13 +6048,15 @@ const A={
   'open-paper':(btn)=>{
     const url=btn.dataset.url;
     let viewUrl=url;
-    // External URLs — proxy through Google Docs viewer for iframe
-    try{
-      const u=new URL(url,location.href);
-      if(u.origin!==location.origin){
-        viewUrl='https://docs.google.com/gview?url='+encodeURIComponent(url)+'&embedded=true';
-      }
-    }catch(e){}
+    // External URLs — proxy through Google Docs viewer for iframe (skip for direct-embed cards)
+    if(!btn.dataset.direct){
+      try{
+        const u=new URL(url,location.href);
+        if(u.origin!==location.origin){
+          viewUrl='https://docs.google.com/gview?url='+encodeURIComponent(url)+'&embedded=true';
+        }
+      }catch(e){}
+    }
     pdfViewerState={url,viewUrl,title:btn.dataset.title};
     const app=document.getElementById('app');
     if(app) app.insertAdjacentHTML('beforeend', renderPdfViewer());
@@ -6103,6 +6336,10 @@ const A={
     if(perm==='granted'){showToast('Streak reminders enabled for 9pm.','🔔');render();}
     else showToast('Permission denied. Enable in browser settings.','!');
   },
+  'set-accent':(btn)=>{
+    const key=btn.dataset.key||'orange';
+    S.accentKey=key;saveAccent(key);render();showToast('Accent colour updated.','◉');
+  },
   'toggle-dark':()=>{
     S.darkMode=!S.darkMode;
     localStorage.setItem('mer_dark',S.darkMode?'1':'0');
@@ -6312,6 +6549,7 @@ function attach(){
       if(v>0){document.querySelectorAll('.dur-pill').forEach(el=>el.classList.remove('on'));}
       updateLogSubmitText();
     }
+    if(e.target.id==='timer-intent-inp'||e.target.id==='tf-intent-inp')S.timerIntent=e.target.value;
     if(e.target.id==='log-note')S.logNote=e.target.value;
     if(e.target.classList.contains('note-area')){const sid=e.target.dataset.subid;if(sid){if(!S.data.subjectNotes)S.data.subjectNotes={};S.data.subjectNotes[sid]=e.target.value;clearTimeout(window._noteSaveTm);window._noteSaveTm=setTimeout(()=>{saveLocal(S.data);},600);}}
     if(e.target.id==='prof-title'&&S.data?.profile){S.data.profile.title=e.target.value;}
@@ -6464,6 +6702,41 @@ function attach(){
   },{passive:true});
 }
 
+/* ════════════════════════════════
+   V2 CHANGELOG POPUP
+════════════════════════════════ */
+function showV2Popup(){
+  if(localStorage.getItem('mer_v2_seen'))return;
+  const el=document.createElement('div');
+  el.className='v2-backdrop';
+  el.id='v2-popup-root';
+  el.innerHTML=`<div class="v2-popup">
+    <div class="v2-popup-top">
+      <div class="v2-badge">✦ VERSION 2</div>
+      <div class="v2-title">Meridian is<br>smarter now.</div>
+      <div class="v2-subtitle">Big update across predictions, dashboard, and timer.</div>
+    </div>
+    <div class="v2-popup-body">
+      <ul class="v2-changelog">
+        <li><div class="v2-cl-icon">◉</div><div class="v2-cl-text"><strong>Score Predictor rebuilt.</strong> More inputs, better model — now shows HSC band forecasts, hero summary, and specific improvement tips.</div></li>
+        <li><div class="v2-cl-icon">▦</div><div class="v2-cl-text"><strong>Milestone shelf.</strong> Earn and track achievements as you study. Unlocked progressively — check Progress.</div></li>
+        <li><div class="v2-cl-icon">◷</div><div class="v2-cl-text"><strong>Session intent.</strong> Set what you're focusing on before starting the timer — pre-commitment boosts follow-through.</div></li>
+        <li><div class="v2-cl-icon">◈</div><div class="v2-cl-text"><strong>28-day heatmap</strong> on dashboard + smarter contextual greeting based on your actual study state.</div></li>
+        <li><div class="v2-cl-icon">⚡</div><div class="v2-cl-text"><strong>Last-60s warning.</strong> Timer ring pulses amber in the final minute so you can wrap up smoothly.</div></li>
+        <li><div class="v2-cl-icon">★</div><div class="v2-cl-text"><strong>Accent colours</strong> in Settings — 6 presets to personalise Meridian.</div></li>
+      </ul>
+      <button class="v2-close-btn" id="v2-close">Got it — let's go</button>
+    </div>
+  </div>`;
+  document.body.appendChild(el);
+  document.getElementById('v2-close').addEventListener('click',()=>{
+    localStorage.setItem('mer_v2_seen','1');
+    el.style.opacity='0';el.style.transition='opacity .2s';
+    setTimeout(()=>el.remove(),220);
+  });
+  el.addEventListener('click',e=>{if(e.target===el){localStorage.setItem('mer_v2_seen','1');el.remove();}});
+}
+
 // Shared auth result handler (used by popup and redirect flows)
 window._meridianHandleAuthResult=async function(result,provider='Google'){
   const user=result.user;
@@ -6542,7 +6815,7 @@ window._meridianHandleAuthResult=async function(result,provider='Google'){
     // else: show auto-auth screen (already handled in renderLogin)
   }
   render();attach();
-  if(S.data){startLiveTick();if(!IS_LOCAL){lbPush().then(()=>lbGetCached(true)).then(d2=>{if(d2){S.lbData=d2;if(S.view==='dashboard'||S.view==='leaderboard')render();}}).catch(()=>{});}}
+  if(S.data){showV2Popup();startLiveTick();if(!IS_LOCAL){lbPush().then(()=>lbGetCached(true)).then(d2=>{if(d2){S.lbData=d2;if(S.view==='dashboard'||S.view==='leaderboard')render();}}).catch(()=>{});}}
   // Check for redirect sign-in result (skip on localhost)
   if(window.FIREBASE_CONFIG&&!IS_LOCAL){
     try{
