@@ -468,13 +468,27 @@ function getVariableReward(){
 /* ════════════════════════════════
    V2 HELPERS
 ════════════════════════════════ */
-function getHSCBand(pct){
-  if(pct>=90)return{band:6,label:'Band 6',cls:'b6'};
-  if(pct>=80)return{band:5,label:'Band 5',cls:'b5'};
-  if(pct>=70)return{band:4,label:'Band 4',cls:'b4'};
-  if(pct>=60)return{band:3,label:'Band 3',cls:'b3'};
-  if(pct>=50)return{band:2,label:'Band 2',cls:'b2'};
-  return{band:1,label:'Band 1',cls:'b1'};
+// Per-subject HSC band thresholds based on NESA historical cutoffs.
+// Extension courses use E1–E4 (4 bands); standard courses use Band 1–6.
+// Cutoffs are raw mark % thresholds — lower for harder courses.
+const HSC_SUBJECT_BANDS = {
+  'Maths Ext 2':    [{min:85,band:4,label:'E4',cls:'b6'},{min:60,band:3,label:'E3',cls:'b4'},{min:35,band:2,label:'E2',cls:'b2'},{min:0,band:1,label:'E1',cls:'b1'}],
+  'Maths Ext 1':    [{min:75,band:4,label:'E4',cls:'b6'},{min:50,band:3,label:'E3',cls:'b4'},{min:27,band:2,label:'E2',cls:'b2'},{min:0,band:1,label:'E1',cls:'b1'}],
+  'Maths Advanced': [{min:91,band:6,label:'Band 6',cls:'b6'},{min:80,band:5,label:'Band 5',cls:'b5'},{min:70,band:4,label:'Band 4',cls:'b4'},{min:59,band:3,label:'Band 3',cls:'b3'},{min:45,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}],
+  'General Maths':  [{min:91,band:6,label:'Band 6',cls:'b6'},{min:80,band:5,label:'Band 5',cls:'b5'},{min:69,band:4,label:'Band 4',cls:'b4'},{min:56,band:3,label:'Band 3',cls:'b3'},{min:42,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}],
+  'Physics':        [{min:90,band:6,label:'Band 6',cls:'b6'},{min:79,band:5,label:'Band 5',cls:'b5'},{min:67,band:4,label:'Band 4',cls:'b4'},{min:52,band:3,label:'Band 3',cls:'b3'},{min:37,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}],
+  'Chemistry':      [{min:90,band:6,label:'Band 6',cls:'b6'},{min:80,band:5,label:'Band 5',cls:'b5'},{min:70,band:4,label:'Band 4',cls:'b4'},{min:55,band:3,label:'Band 3',cls:'b3'},{min:40,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}],
+  'Biology':        [{min:91,band:6,label:'Band 6',cls:'b6'},{min:80,band:5,label:'Band 5',cls:'b5'},{min:70,band:4,label:'Band 4',cls:'b4'},{min:55,band:3,label:'Band 3',cls:'b3'},{min:38,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}],
+  'English Advanced':[{min:90,band:6,label:'Band 6',cls:'b6'},{min:80,band:5,label:'Band 5',cls:'b5'},{min:70,band:4,label:'Band 4',cls:'b4'},{min:60,band:3,label:'Band 3',cls:'b3'},{min:50,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}],
+  'English Standard':[{min:90,band:6,label:'Band 6',cls:'b6'},{min:80,band:5,label:'Band 5',cls:'b5'},{min:70,band:4,label:'Band 4',cls:'b4'},{min:58,band:3,label:'Band 3',cls:'b3'},{min:45,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}],
+  'Earth & Env Science':[{min:90,band:6,label:'Band 6',cls:'b6'},{min:79,band:5,label:'Band 5',cls:'b5'},{min:67,band:4,label:'Band 4',cls:'b4'},{min:52,band:3,label:'Band 3',cls:'b3'},{min:37,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}],
+};
+// Default for humanities + other 2-unit courses (approx standard thresholds)
+const HSC_BANDS_DEFAULT=[{min:90,band:6,label:'Band 6',cls:'b6'},{min:80,band:5,label:'Band 5',cls:'b5'},{min:70,band:4,label:'Band 4',cls:'b4'},{min:60,band:3,label:'Band 3',cls:'b3'},{min:50,band:2,label:'Band 2',cls:'b2'},{min:0,band:1,label:'Band 1',cls:'b1'}];
+
+function getHSCBand(pct,subjectName){
+  const table=(subjectName&&HSC_SUBJECT_BANDS[subjectName])||HSC_BANDS_DEFAULT;
+  return table.find(b=>pct>=b.min)||table[table.length-1];
 }
 
 function getMilestones(sessions,tests,subjects){
@@ -751,15 +765,15 @@ function getTestGrade(pct){
   if(pct>=60)return{letter:'C',color:'var(--warn)'};
   return{letter:'D',color:'var(--err)'};
 }
-// Grade adjusted for subject difficulty — shows what the score really means
-function getDifficultyGrade(pct,diff){
-  if(diff<1.05)return getTestGrade(pct);
-  const adj=pct*Math.pow(diff,0.65); // softer scaling than raw diff
-  if(adj>=90)return{letter:'A+',color:'var(--ok)'};
-  if(adj>=80)return{letter:'A',color:'var(--ok)'};
-  if(adj>=70)return{letter:'B',color:'var(--acc)'};
-  if(adj>=60)return{letter:'C',color:'var(--warn)'};
-  return{letter:'D',color:'var(--err)'};
+// Grade letter using subject-specific band thresholds
+function getDifficultyGrade(pct,diff,subjectName){
+  const band=getHSCBand(pct,subjectName);
+  // Map band position to letter — top band = A+, second = A, etc.
+  const table=(subjectName&&HSC_SUBJECT_BANDS[subjectName])||HSC_BANDS_DEFAULT;
+  const idx=table.indexOf(band); // 0 = highest band
+  const letters=['A+','A','B','C','D','D'];
+  const colors=['var(--ok)','var(--ok)','var(--acc)','var(--warn)','var(--err)','var(--err)'];
+  return{letter:letters[idx]??'D',color:colors[idx]??'var(--err)'};
 }
 
 /* ════════════════════════════════
@@ -3224,7 +3238,7 @@ function renderProgress(){
       <div class="pred-hero-label">Grade forecast · ${predsWithData.length} subject${predsWithData.length!==1?'s':''}</div>
       <div class="pred-hero-subjects">
         ${predsWithData.map(sp=>{
-          const band=getHSCBand(sp.pred.point);
+          const band=getHSCBand(sp.pred.point,sp.sub.name);
           return`<div class="pred-hs-row">
             <div class="pred-hs-abbr" style="background:${sp.c.bg};color:${sp.c.tx};border:1px solid ${sp.c.bd};">${sp.sub.abbr}</div>
             <div class="pred-hs-name">${sp.sub.name}${sp.hardBadge?` <span style="font-size:9px;color:var(--warn);">${sp.hardBadge}</span>`:''}</div>
@@ -3250,12 +3264,12 @@ function renderProgress(){
       const miniBarH=36;
       const miniBars=subTests.slice(-6).map(t=>{
         const pct=t.score/t.outOf*100;
-        const dg=getDifficultyGrade(pct,subDiff);
+        const dg=getDifficultyGrade(pct,subDiff,sub.name);
         const h=Math.max(4,Math.round((pct/100)*miniBarH));
         return`<div class="pred-subject-mini-bar" style="height:${h}px;background:${dg.color};" title="${pct.toFixed(0)}% — ${t.name}"></div>`;
       }).join('');
 
-      const grade=avgPct?getDifficultyGrade(avgPct,subDiff):{letter:'—',color:'var(--tx3)'};
+      const grade=avgPct?getDifficultyGrade(avgPct,subDiff,sub.name):{letter:'—',color:'var(--tx3)'};
 
       // Tip — richer, more specific
       let tip='';
@@ -3268,12 +3282,12 @@ function renderProgress(){
         else if(pred.qualFactor<1&&pred.studyDays28>=8)tip=`Your sessions are happening regularly but confidence ratings are lower than usual. Focus on active recall rather than passive re-reading.`;
         else if(pred.confMomentum&&pred.confMomentum>0.3)tip=`Confidence is rising fast — this momentum will keep lifting your prediction. Stay consistent.`;
         else if(gap>3)tip=`On track to improve by ~${gap.toFixed(0)}% from your baseline. Keep the current approach going.`;
-        else if(subDiff>=1.2&&avgPct>=55)tip=`${Math.round(avgPct)}% in ${sub.name} is a strong result for one of the HSC's hardest subjects.`;
+        else if(subDiff>=1.2&&avgPct>=50){const gb=getHSCBand(avgPct,sub.name);tip=`${Math.round(avgPct)}% in ${sub.name} is ${gb.label} — strong for one of the HSC's hardest subjects.`;}
       } else if(pred?.coldStart){
         tip=`Log a test result to sharpen this estimate — the model will immediately improve.`;
       }
 
-      const bandInfo=pred?getHSCBand(pred.point):null;
+      const bandInfo=pred?getHSCBand(pred.point,sub.name):null;
 
       return`<div class="pred-subject-block">
         <div class="pred-subject-hd">
@@ -3315,7 +3329,7 @@ function renderProgress(){
           const hidden=reversed.slice(1);
           const renderCard=t=>{
             const pct=t.score/t.outOf*100;
-            const dg=getDifficultyGrade(pct,subDiff);
+            const dg=getDifficultyGrade(pct,subDiff,sub.name);
             const ctx=getDifficultyContext(pct,subDiff);
             return`<div class="test-card">
               <div class="test-score-circle" style="border-color:${dg.color};color:${dg.color};">
@@ -3342,7 +3356,7 @@ function renderProgress(){
     return`
     ${upcomingHtml}
     ${heroHtml}
-    <div class="predict-intro"><strong>How it works:</strong> Predictions use your test history, study hours, confidence ratings, topic coverage, session quality, and study consistency — weighted and adjusted for subject difficulty. More data = tighter estimates.</div>
+    <div class="pred-action-tip"><strong>How it works:</strong> Predictions use your test history, study hours, confidence ratings, topic coverage, session quality, and study consistency — weighted and adjusted for subject difficulty. More data = tighter estimates.</div>
     ${predCards}
     <button class="pred-tab-log-btn" data-action="open-log-test">＋ Log Test Score</button>`;
   }
